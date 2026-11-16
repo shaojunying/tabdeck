@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabDeck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lets a local AI agent manage tabs and tab groups over MCP: one task-named group per session.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -9,7 +9,8 @@
     "tabGroups",
     "nativeMessaging",
     "storage",
-    "alarms"
+    "alarms",
+    "debugger"
   ],
   "background": {
     "service_worker": "background.js"

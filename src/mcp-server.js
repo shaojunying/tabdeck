@@ -104,7 +104,15 @@ async function onRpc(msg) {
     } else {
       try {
         const r = await callBrowser(name, (params && params.arguments) || {});
-        result = { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+        // 扩展可以用 __text / __image 直接给出文本和图片，其余结果按 JSON 输出。
+        if (r && (r.__text !== undefined || r.__image)) {
+          const content = [];
+          if (r.__image) content.push({ type: 'image', data: r.__image.data, mimeType: r.__image.mimeType });
+          if (r.__text !== undefined) content.push({ type: 'text', text: String(r.__text) });
+          result = { content };
+        } else {
+          result = { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+        }
       } catch (e) {
         result = { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
       }

@@ -38,6 +38,23 @@ MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src
 | `group_set` | 改组名、颜色、折叠状态 |
 | `session_end` | 结束：关掉全部 / 只解散组 / 原样保留 |
 
+## 页面操作（第二阶段）
+
+只能用在本 session 的标签页上（别的标签页先 `tabs_adopt`）。经 `chrome.debugger` 实现，用的时候 Chrome 顶部会出现"TabDeck 已开始调试此浏览器"的提示条，`session_end` 或 MCP server 退出后松开。
+
+| 工具 | 作用 |
+| --- | --- |
+| `page_navigate` | 在 session 的标签页里打开网址，等加载完 |
+| `page_snapshot` | 把页面读成紧凑的无障碍树文本；可操作的元素带 `[ref=e42]` |
+| `page_click` | 按 ref 点击（`double` 双击），返回点击后的标签页状态 |
+| `page_type` | 按 ref 输入文字，默认替换原内容（`append` 追加，`submit` 回车） |
+| `page_key` | 按一个键（Enter、Tab、Escape、方向键等） |
+| `page_screenshot` | 截当前可见区域（JPEG） |
+
+- 后台标签页也能点击和输入，不用切到前台（attach 时开了焦点模拟；不开的话后台标签页和被挡住的窗口收不到鼠标事件）。
+- 截图只能截前台标签页，超时就先 `tab_activate`。
+- 还不支持：iframe 里的内容、文件上传、下拉框选择、悬停、执行脚本、console 和网络（第三阶段）。
+
 ## 行为约定
 
 - session 的标签页 = 组里的标签页。用户把标签页拖进组就等于交给 session，拖出去就收回。
@@ -51,7 +68,8 @@ MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src
 - `node test/plumbing.test.mjs`：不需要 Chrome，脚本扮演扩展，验证 MCP server 和 host 之间的通信链路。
 - `node test/live.test.mjs`：需要 Chrome 开着且扩展已加载。会临时开两个标签页，把工具调一遍，测完自己关掉。
 - `node test/live2.test.mjs`：同样需要 Chrome。测 `tab_activate`、`session_end` 的 ungroup / keep、两个 session 互不干扰、MCP server 退出后的清理（只有空白页才自动关）。
-- 还没覆盖：自动收编新标签页（要能在页面里点链接，等第二阶段）。与 Playwright 扩展的组共存已实测（它的组在场时两个测试都通过，组没被动）。
+- `node test/live3.test.mjs`：页面操作。自己起一个本地网页当靶子，测快照、输入、按键、点击、表单提交、导航、截图、失效 ref 的报错，以及点链接开出的新标签页自动进组。
+- 与 Playwright 扩展的组共存已实测（它的组在场时两个测试都通过，组没被动）。
 
 ## 开发
 

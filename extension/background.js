@@ -6,6 +6,8 @@ const HOST = 'com.tabdeck.host';
 const COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const BLANK = new Set(['', 'about:blank', 'chrome://newtab/', 'chrome://new-tab-page/']);
 
+importScripts('page.js'); // 页面操作：pageHandlers、detachTabs
+
 // ---------- 与 native host 的连接 ----------
 let port = null;
 
@@ -287,12 +289,15 @@ const handlers = {
   async session_end(sess, sid, p, sessions) {
     const mode = p.mode || 'close';
     const ids = (await sessionTabs(sess)).map((t) => t.id);
+    await detachTabs(ids);
     if (mode === 'close') await closeTabs(ids);
     else if (mode === 'ungroup' && (await liveGroup(sess))) await chrome.tabs.ungroup((await chrome.tabs.query({ groupId: sess.groupId })).map((t) => t.id));
     delete sessions[sid];
     return { mode, tabs: ids };
   },
 };
+
+Object.assign(handlers, pageHandlers);
 
 async function dispatch({ sessionId: sid, method, params }) {
   const sessions = await loadSessions();
@@ -302,6 +307,7 @@ async function dispatch({ sessionId: sid, method, params }) {
       const sess = sessions[sid];
       if (sess) {
         const tabs = await sessionTabs(sess);
+        await detachTabs(tabs.map((t) => t.id));
         if (tabs.length && tabs.every((t) => BLANK.has(t.url || t.pendingUrl || ''))) await closeTabs(tabs.map((t) => t.id));
         delete sessions[sid];
       }

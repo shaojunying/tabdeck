@@ -12,6 +12,9 @@ const color = {
   enum: ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'],
 };
 
+const tabId = { type: 'integer', description: "A tab that belongs to this session (see tabs_list)." };
+const ref = { type: 'string', description: 'Element ref from page_snapshot, e.g. "e42".' };
+
 module.exports = [
   {
     name: 'session_start',
@@ -99,5 +102,49 @@ module.exports = [
     description:
       'Finish the browser task. mode="close" (default) closes every tab of this session; "ungroup" keeps the tabs but dissolves the group; "keep" leaves the group as it is.',
     inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['close', 'ungroup', 'keep'] } } },
+  },
+
+  // ---- 页面操作：只能用在本 session 的标签页上 ----
+  {
+    name: 'page_navigate',
+    description: "Load a URL in one of this session's tabs and wait for it to finish loading.",
+    inputSchema: { type: 'object', properties: { tabId, url: { type: 'string' } }, required: ['tabId', 'url'] },
+  },
+  {
+    name: 'page_snapshot',
+    description:
+      "Read a page as a compact accessibility tree: one line per element with its role and name. Elements you can act on carry a ref like [ref=e42]; pass that ref to page_click / page_type. Refs stay valid until the page navigates or re-renders the element; take a new snapshot after the page changes. Only the main frame is covered (no iframes). Works on this session's tabs only.",
+    inputSchema: { type: 'object', properties: { tabId }, required: ['tabId'] },
+  },
+  {
+    name: 'page_click',
+    description: 'Click an element by its ref from page_snapshot. Returns the tab afterwards, so you can see whether the click navigated.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, ref, double: { type: 'boolean', description: 'Double-click instead.' } },
+      required: ['tabId', 'ref'],
+    },
+  },
+  {
+    name: 'page_type',
+    description:
+      'Type text into an input, textarea or editable element by its ref. Replaces the existing content unless append=true. Set submit=true to press Enter afterwards.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, ref, text: { type: 'string' }, append: { type: 'boolean' }, submit: { type: 'boolean' } },
+      required: ['tabId', 'ref', 'text'],
+    },
+  },
+  {
+    name: 'page_key',
+    description:
+      'Press a single key in the tab (goes to whatever element has focus): Enter, Tab, Escape, Backspace, Delete, Space, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown.',
+    inputSchema: { type: 'object', properties: { tabId, key: { type: 'string' } }, required: ['tabId', 'key'] },
+  },
+  {
+    name: 'page_screenshot',
+    description:
+      'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. Chrome only paints the foreground tab of a window, so call tab_activate first if it times out.',
+    inputSchema: { type: 'object', properties: { tabId }, required: ['tabId'] },
   },
 ];
