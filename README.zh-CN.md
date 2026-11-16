@@ -7,9 +7,7 @@
   <img alt="版本 0.3.0" src="https://img.shields.io/badge/version-0.3.0-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 扩展" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
-  <img alt="Node 18+" src="https://img.shields.io/badge/node-%E2%89%A518-339933?logo=nodedotjs&logoColor=white">
   <img alt="零依赖" src="https://img.shields.io/badge/dependencies-0-brightgreen">
-  <img alt="22 个工具" src="https://img.shields.io/badge/tools-22-fa903e">
   <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-0078D4">
   <a href="https://github.com/shaojunying/tabdeck/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/shaojunying/tabdeck?style=social"></a>
 </p>
@@ -20,104 +18,126 @@
 
 ---
 
-**TabDeck 让本地 AI agent 通过 MCP 操作你真实的、已登录的 Chrome，每个任务放在一个按任务命名的标签页组里。**
-
-它由一个 Chrome 扩展和一个零依赖的 MCP server 组成。任何 MCP 客户端（Claude Code、Codex、Copilot CLI、Cursor 等）都能用：管理标签页和组，读页面、点击、输入、选下拉框、悬停、滚动、等待、执行脚本和截图。每个 session（一个 MCP server 进程）对应一个标签页组。
+**TabDeck 让本地 AI agent 通过 MCP 操作你真实的、已登录的 Chrome，每个任务放在一个按任务命名的标签页组里。** 一个 Chrome 扩展加一个零依赖的 MCP server，Claude Code、Codex、Copilot CLI、Cursor 等任何 MCP 客户端都能用。
 
 > [!NOTE]
-> **灵感来自 [Claude in Chrome](https://claude.com/claude-in-chrome)。** TabDeck 是同一思路的开源、不绑定模型的实现：用扩展让 agent 在你自己的浏览器里、在它自己的标签页组里干活。本项目是独立项目，与 Anthropic 无关联，也未获其背书；只参考公开文档编写，没有使用该扩展的任何代码。
+> 灵感来自 [Claude in Chrome](https://claude.com/claude-in-chrome)。TabDeck 是同一思路的独立实现，不绑定模型；与 Anthropic 无关联，也没有使用该扩展的任何代码。
 
-## 一次 session 是什么样
+## ✨ 为什么做
+
+| | 用你已登录的 Chrome | 连接时不弹确认 | 任意模型 / 客户端 | 标签页有条理 |
+|---|:---:|:---:|:---:|:---:|
+| 远程调试类 MCP | ✅ | ❌ | ✅ | ❌ |
+| 扩展中继类 MCP | ✅ | ✅ | ✅ | ⚠️ |
+| Claude in Chrome | ✅ | ✅ | ❌ | ✅ |
+| **TabDeck** | ✅ | ✅ | ✅ | ✅ |
+
+- 🗂️ **每个 session 一个标签页组**，以任务命名，颜色自动与别的组区分。
+- 🧲 **点击开出的新标签页留在组里**，不抢你正在看的标签页。
+- 🌙 **在后台标签页里干活**：点击、输入、截图都不用切到前台。
+- 🔒 **只动自己的标签页**，要动你的标签页必须先明确收编。
+- 🪶 **零依赖**：约 1200 行纯 JavaScript。
+
+## 🎬 演示
 
 <p align="center">
   <img src="docs/session.svg" alt="示例 session：session_start、tab_open、page_snapshot、page_type、page_click、page_screenshot、session_end" width="100%">
 </p>
 
-本页的图是行为示意图，不是真实浏览器的截图。
+<sub>本页的图是示意图，不是真实浏览器的截图。</sub>
 
-## 结构
+## 🚀 安装
 
+需要 Chrome 116+、Node.js 18+，目前只支持 Windows。
+
+```bash
+git clone https://github.com/shaojunying/tabdeck.git
+cd tabdeck
+node scripts/setup.mjs
 ```
-MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src/host.js ──native messaging──> extension/background.js
-```
 
-- `extension/`：MV3 扩展，权限 `tabs`、`tabGroups`、`nativeMessaging`、`storage`、`alarms`、`debugger`。
-- `src/host.js`：native messaging host，由 Chrome 拉起，在 `\\.\pipe\tabdeck-<用户名>` 上接受多个 MCP server。
-- `src/mcp-server.js`：MCP server，无 npm 依赖。
-- `src/tools.js`：工具定义。
+1. 打开 `chrome://extensions`，开启“开发者模式”，点“加载已解压的扩展程序”，选 `extension/` 目录。
+2. 在 MCP 客户端里加一个 stdio server：
 
-## 安装（Windows）
+   ```json
+   { "mcpServers": { "tabdeck": { "command": "node", "args": ["C:\\path\\to\\tabdeck\\src\\mcp-server.js"] } } }
+   ```
 
-1. `node scripts/setup.mjs`：给扩展写入固定 key（ID 不随目录变化）、生成 `native-host/`、注册 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.tabdeck.host`。
-   - 如果是在打包应用里的 shell 跑（比如 Claude 桌面版的 session），要加 `--via-wmi`：这类 shell 写 `HKCU` 会被重定向到应用私有的注册表视图，Chrome 看不到，扩展会报 `Specified native messaging host not found`。
-2. Chrome 打开 `chrome://extensions`，开“开发者模式”，“加载已解压的扩展程序”，选 `extension/` 目录。
-3. 在 MCP 客户端里加一个 stdio server：`node <本目录>\src\mcp-server.js`。
+   Claude Code：`claude mcp add tabdeck -- node C:\path\to\tabdeck\src\mcp-server.js`
 
-卸载：`node scripts/setup.mjs --uninstall`（删注册表项），再到 `chrome://extensions` 移除扩展。
+卸载：`node scripts/setup.mjs --uninstall`，再移除扩展。
 
-## 工具
+## 🧰 工具
+
+<details>
+<summary><b>标签页和组</b>（10 个）</summary>
 
 | 工具 | 作用 |
 |---|---|
-| `session_start` | 给本 session 的组起名（按任务命名） |
-| `tabs_list` | 列出本 session 的标签页；`scope=all` 列出全部标签页和组 |
-| `tab_open` | 在本 session 的组里开新标签页 |
+| `session_start` | 给本 session 的组按任务起名 |
+| `tabs_list` | 列出本 session 的标签页；`scope="all"` 列出全部 |
+| `tab_open` | 在组里开新标签页，默认在后台 |
 | `tabs_adopt` | 把已有标签页收进本 session 的组 |
 | `tabs_close` | 关标签页，默认只能关本 session 的 |
 | `tab_activate` | 切到某个标签页 |
 | `tabs_group` / `tabs_ungroup` | 通用整理：进组、出组 |
 | `group_set` | 改组名、颜色、折叠状态 |
-| `session_end` | 结束：关掉全部 / 只解散组 / 原样保留 |
+| `session_end` | 结束：全部关掉、只解散组，或原样保留 |
 
-## 页面操作（第二阶段）
+</details>
 
-只能用在本 session 的标签页上（别的标签页先 `tabs_adopt`）。经 `chrome.debugger` 实现，用的时候 Chrome 顶部会出现"TabDeck 已开始调试此浏览器"的提示条，`session_end` 或 MCP server 退出后松开。
+<details>
+<summary><b>页面操作</b>（12 个）</summary>
 
 | 工具 | 作用 |
-| --- | --- |
-| `page_navigate` | 在 session 的标签页里打开网址，等加载完 |
-| `page_snapshot` | 把页面读成紧凑的无障碍树文本；可操作的元素带 `[ref=e42]` |
-| `page_click` | 按 ref 点击（`double` 双击），返回点击后的标签页状态 |
-| `page_type` | 按 ref 输入文字，默认替换原内容（`append` 追加，`submit` 回车） |
-| `page_key` | 按一个键（Enter、Tab、Escape、方向键等） |
-| `page_screenshot` | 截当前可见区域（JPEG） |
-| `page_select` | 在原生下拉框里按文字或值选中 |
+|---|---|
+| `page_navigate` | 打开网址并等加载完 |
+| `page_snapshot` | 把页面读成紧凑的无障碍树，可操作的元素带 ref |
+| `page_click` | 按 ref 点击，并报告点击开出的新标签页 |
+| `page_type` | 按 ref 输入文字，可选回车 |
+| `page_key` | 按一个键 |
+| `page_select` | 在原生下拉框里选中选项 |
 | `page_hover` | 悬停到元素上 |
 | `page_scroll` | 滚一屏、到顶 / 到底，或滚到某个元素 |
 | `page_history` | 后退、前进、刷新 |
 | `page_wait` | 等某段文字出现或消失 |
 | `page_eval` | 在页面里执行一段 JavaScript |
+| `page_screenshot` | 截当前可见区域，JPEG，最宽 1280 像素 |
 
-- 后台标签页也能点击和输入，不用切到前台（attach 时开了焦点模拟；不开的话后台标签页和被挡住的窗口收不到鼠标事件）。
-- 点击前会做命中检查：目标被别的元素挡住时换一块区域或把它滚到视口中间再试，还是点不到就报错说明被什么挡住，不会悄悄点到别的东西上。
-- 截图缩到最宽 1280 像素（高分屏原图能到 5000 多像素宽，模型看不了）。实测后台标签页也能截；万一超时，`tab_activate` 带 `focusWindow=true` 后重试。
-- 点击或回车开出的新标签页会在返回值的 `opened` 里报出来，直接进组，并且不抢你正在看的标签页。
-- 还不支持：iframe 里的内容、文件上传、console 和网络。
+</details>
 
-## 行为约定
+## 🧩 工作原理
 
-- session 的标签页 = 组里的标签页。用户把标签页拖进组就等于交给 session，拖出去就收回。
-- session 的标签页打开的新标签页会自动收进同一个组；弹窗窗口里的标签页进不了组，只记在 session 名下。
-- MCP server 进程退出时，只有当 session 的标签页全是空白页才自动关掉，其余原样保留。
-- 关标签页如果会把窗口关空，会先补一个空白页。
-- 组的外观以"简洁、一眼能区分"为准：标题就是任务名，不加任何前缀（没起名时叫 `Agent`），和别的组重名时自动加序号；没指定颜色时挑浏览器里用得最少的颜色，不用灰色。
+```mermaid
+flowchart LR
+    A["MCP 客户端"] -- stdio --> B["mcp-server.js<br/>一个进程 = 一个 session"]
+    B -- 命名管道 --> C["host.js"]
+    C -- native messaging --> D["扩展"]
+    D -- "tabs · tabGroups · debugger" --> E["Chrome"]
+```
 
-## 测试
+页面操作经 `chrome.debugger` 实现，所以 session 操作页面时 Chrome 顶部会出现“已开始调试此浏览器”的提示条。
 
-- `node test/plumbing.test.mjs`：不需要 Chrome，脚本扮演扩展，验证 MCP server 和 host 之间的通信链路。
-- `node test/live.test.mjs`：需要 Chrome 开着且扩展已加载。会临时开两个标签页，把工具调一遍，测完自己关掉。
-- `node test/live2.test.mjs`：同样需要 Chrome。测 `tab_activate`、`session_end` 的 ungroup / keep、两个 session 互不干扰、MCP server 退出后的清理（只有空白页才自动关）。
-- `node test/live3.test.mjs`：页面操作。自己起一个本地网页当靶子，测快照、输入、按键、点击、表单提交、导航、截图、失效 ref 的报错，以及点链接开出的新标签页自动进组。
-- 与 Playwright 扩展的组共存已实测（它的组在场时两个测试都通过，组没被动）。
+## 🛡️ 限制与安全
 
-## 开发
+> [!WARNING]
+> agent 对页面的访问权限和你一样，包括你的登录态。只给你信任的 agent 和提示词使用；网页里可能有专门误导 agent 的文字。
 
-改了 `extension/` 下的代码要重载扩展才生效：`node scripts/reload.mjs`。它走 TabDeck 自己的通道（管道 → host → 扩展）让扩展重载自己，不碰调试端口，Chrome 不弹窗；脚本会等新一轮 service worker 连回来再退出。`--info` 只看当前 service worker 的 boot 标记。重载会清空 session 状态（`chrome.storage.session`），进行中的 session 会丢掉与标签页组的对应关系。`dev.reload` / `dev.info` 不是 MCP 工具，agent 调不到。
+- 还不支持：macOS / Linux、iframe 里的内容、文件上传、console 和网络查看、按站点授权。
+- `page_eval` 会在 session 的标签页里执行任意 JavaScript。
+- `chrome://` 页面和 Chrome 应用商店不能操作。
 
-`node scripts/sw-eval.mjs "<代码>"` 经 Chrome 的远程调试端口进到扩展的 service worker 里执行代码，`--reload` 重新加载扩展。每次连接 Chrome 都会弹窗要点 Allow。
+<details>
+<summary><b>开发与排查</b></summary>
 
-## 排查
+- `node test/plumbing.test.mjs` 不需要 Chrome，测 server 和 host；`npm run test:live` 在你的真实 Chrome 里跑，会临时开几个标签页。
+- 改了 `extension/` 下的代码后跑 `node scripts/reload.mjs` 重载扩展，Chrome 不弹窗。
+- `Cannot reach the TabDeck extension`：Chrome 没开、扩展没加载，或者没跑过 setup。
+- `Specified native messaging host not found`：setup 是在打包应用（MSIX）里的 shell 跑的，注册表写进了应用私有视图。加 `--via-wmi` 重跑。
+- 日志：`native-host/host.log`，以及 `chrome://extensions` 里 TabDeck 卡片上的“Service Worker”链接。
 
-- host 日志：`native-host/host.log`。
-- 扩展日志：`chrome://extensions` 里点 TabDeck 的“Service Worker”。
-- 工具报 `Cannot reach the TabDeck extension`：Chrome 没开、扩展没加载，或者没跑过 setup。扩展每 30 秒会重试连接 host。
+</details>
+
+## 📄 License
+
+[MIT](LICENSE)
