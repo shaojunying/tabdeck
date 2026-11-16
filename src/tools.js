@@ -118,7 +118,8 @@ module.exports = [
   },
   {
     name: 'page_click',
-    description: 'Click an element by its ref from page_snapshot. Returns the tab afterwards, so you can see whether the click navigated.',
+    description:
+      'Click an element by its ref from page_snapshot. Returns the tab afterwards (compare its url to see whether it navigated). If the click opened new tabs, they are listed under "opened"; they already belong to this session and stay in the background, so use their ids directly.',
     inputSchema: {
       type: 'object',
       properties: { tabId, ref, double: { type: 'boolean', description: 'Double-click instead.' } },
@@ -144,7 +145,7 @@ module.exports = [
   {
     name: 'page_screenshot',
     description:
-      'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. The image is scaled down to at most 1280px wide. Works on background tabs; if it times out, call tab_activate with focusWindow=true and retry.',
+      'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. The image is scaled down to at most 1280px wide. No need to activate the tab first: if a background tab cannot be captured, it is switched to for a moment and switched back automatically.',
     inputSchema: { type: 'object', properties: { tabId }, required: ['tabId'] },
   },
 ];

@@ -3,10 +3,15 @@
 // 只允许操作本 session 的标签页；别的标签页要先 tabs_adopt。
 
 const attached = new Set(); // 已 attach 调试器的 tabId
+let windowOpens = []; // 最近的 Page.windowOpen 事件：{ tabId, url, at }
 // 没拿到 debugger 权限时别让整个 service worker 起不来，留到调用时再报错。
 if (chrome.debugger) {
   chrome.debugger.onDetach.addListener((src) => {
     if (src.tabId != null) attached.delete(src.tabId);
+  });
+  // 页面要开新窗口 / 新标签页时（window.open、target=_blank 的链接、表单提交）由发起的那个页面上报。
+  chrome.debugger.onEvent.addListener((src, method, params) => {
+    if (method === 'Page.windowOpen' && src.tabId != null) windowOpens.push({ tabId: src.tabId, url: (params && params.url) || '', at: Date.now() });
   });
 }
 
@@ -38,6 +43,8 @@ async function ensureAttached(tabId) {
   attached.add(tabId);
   // 让页面当自己在前台、有焦点：后台标签页和被挡住的窗口里，鼠标键盘事件才会照常送达。
   await cdp(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
+  // 打开 Page 域才收得到 Page.windowOpen，用来认出"这个标签页开出了新标签页"。
+  await cdp(tabId, 'Page.enable').catch(() => {});
 }
 
 // 松开调试器（顶部的"正在调试此浏览器"提示条随之消失）。
@@ -72,6 +79,7 @@ const INTERACTIVE = new Set([
 const FLAGS = ['checked', 'disabled', 'expanded', 'selected', 'required', 'pressed'];
 const MAX_SNAPSHOT = 60000;
 const SHOT_MAX_WIDTH = 1280;
+const NEW_TAB_WAIT_MS = 500;
 const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
 
 function renderAxTree(nodes) {
@@ -211,6 +219,61 @@ async function waitLoaded(tabId, ms) {
 }
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 执行一个可能开出新标签页的动作（点击、回车）。动作期间由这个标签页开出的新标签页：
+// 直接收进 session（不等 onCreated 那条排队的自动收编）、在返回值的 opened 里报出来，
+// 并且不让它抢走用户正在看的标签页。
+async function actAndCollect(sess, sid, tabId, action, loadMs) {
+  const self = await chrome.tabs.get(tabId);
+  const [front] = await chrome.tabs.query({ windowId: self.windowId, active: true });
+  const created = [];
+  const onCreated = (t) => created.push({ id: t.id, opener: t.openerTabId });
+  chrome.tabs.onCreated.addListener(onCreated);
+  const startedAt = Date.now();
+  try {
+    await action();
+    // 新标签页一般立刻出现；稍等一下，一出现就不再多等。
+    const deadline = Date.now() + NEW_TAB_WAIT_MS;
+    while (Date.now() < deadline && !created.length) await settle(50);
+    await settle(created.length ? 200 : 0);
+  } finally {
+    chrome.tabs.onCreated.removeListener(onCreated);
+  }
+  // 这次动作期间，本标签页上报了几次"要开新窗口"。
+  let claims = windowOpens.filter((w) => w.tabId === tabId && w.at >= startedAt).length;
+  windowOpens = windowOpens.filter((w) => Date.now() - w.at < 30000);
+  const opened = [];
+  for (const { id, opener } of created) {
+    let t;
+    try {
+      t = await chrome.tabs.get(id);
+    } catch {
+      continue; // 开了又马上关了
+    }
+    const win = await chrome.windows.get(t.windowId);
+    // 怎么认出"是这次动作开的"：openerTabId 和所在的组都靠不住——后台标签页开出的新标签页，
+    // Chrome 把这两样都记到窗口里当时的前台标签页上。可靠的是本标签页上报的 Page.windowOpen：
+    // 上报了几次，就认领几个动作期间出现的新标签页。
+    let mine = opener === tabId;
+    if (!mine && claims > 0) mine = true;
+    if (!mine) continue; // 比如用户自己刚好开了一个
+    claims--;
+    if (win.type === 'normal') await putInSessionGroup(sess, sid, [id]);
+    else if (!sess.extra.includes(id)) sess.extra.push(id);
+    opened.push(id);
+  }
+  // 新标签页默认开在前台；用户原来在看别的标签页的话，切回去。
+  if (front && front.id !== tabId && opened.length) {
+    const [now] = await chrome.tabs.query({ windowId: self.windowId, active: true });
+    if (now && opened.includes(now.id)) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
+  }
+  const result = tabInfo(await waitLoaded(tabId, loadMs));
+  if (opened.length) {
+    result.opened = [];
+    for (const id of opened) result.opened.push(tabInfo(await chrome.tabs.get(id)));
+  }
+  return result;
+}
+
 const pageHandlers = {
   async page_navigate(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
@@ -231,9 +294,8 @@ const pageHandlers = {
   async page_click(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
     await ensureAttached(tabId);
-    await clickAt(tabId, await centerOf(tabId, refToNode(p.ref)), p.double ? 2 : 1);
-    await settle(400);
-    return tabInfo(await waitLoaded(tabId, 10000));
+    const pt = await centerOf(tabId, refToNode(p.ref));
+    return actAndCollect(sess, sid, tabId, () => clickAt(tabId, pt, p.double ? 2 : 1), 10000);
   },
 
   async page_type(sess, sid, p) {
@@ -253,19 +315,14 @@ const pageHandlers = {
     }
     if (p.text) await cdp(tabId, 'Input.insertText', { text: p.text });
     else if (!p.append) await pressKey(tabId, 'Delete');
-    if (p.submit) {
-      await pressKey(tabId, 'Enter');
-      await settle(400);
-    }
-    return tabInfo(await waitLoaded(tabId, p.submit ? 10000 : 0));
+    if (p.submit) return actAndCollect(sess, sid, tabId, () => pressKey(tabId, 'Enter'), 10000);
+    return tabInfo(await chrome.tabs.get(tabId));
   },
 
   async page_key(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
     await ensureAttached(tabId);
-    await pressKey(tabId, p.key);
-    await settle(200);
-    return tabInfo(await chrome.tabs.get(tabId));
+    return actAndCollect(sess, sid, tabId, () => pressKey(tabId, p.key), p.key === 'Enter' ? 10000 : 0);
   },
 
   async page_screenshot(sess, sid, p) {
@@ -275,20 +332,29 @@ const pageHandlers = {
     const { cssVisualViewport: vv } = await cdp(tabId, 'Page.getLayoutMetrics');
     const dpr = (await cdp(tabId, 'Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true })).result.value || 1;
     const scale = Math.min(1, SHOT_MAX_WIDTH / (vv.clientWidth * dpr));
+    const params = { format: 'jpeg', quality: 70, clip: { x: vv.pageX, y: vv.pageY, width: vv.clientWidth, height: vv.clientHeight, scale } };
     let shot;
+    let note = '';
     try {
-      shot = await cdp(
-        tabId,
-        'Page.captureScreenshot',
-        { format: 'jpeg', quality: 70, clip: { x: vv.pageX, y: vv.pageY, width: vv.clientWidth, height: vv.clientHeight, scale } },
-        8000
-      );
-    } catch (e) {
-      throw new Error(
-        `${e.message}. Chrome only paints a tab that is the active tab of a visible window. Call tab_activate with tabId=${tabId} and focusWindow=true, then try again (this brings Chrome to the front).`
-      );
+      // 后台标签页只有刚好在出新画面时才截得到（比如刚加载完）；闲着的后台标签页会一直等不到。
+      shot = await cdp(tabId, 'Page.captureScreenshot', params, 2500);
+    } catch {
+      // 退一步：在它的窗口里短暂切到这个标签页，截完马上切回用户原来看的那个。不动窗口焦点。
+      const self = await chrome.tabs.get(tabId);
+      const [front] = await chrome.tabs.query({ windowId: self.windowId, active: true });
+      await chrome.tabs.update(tabId, { active: true });
+      try {
+        shot = await cdp(tabId, 'Page.captureScreenshot', params, 8000);
+      } catch (e) {
+        throw new Error(
+          `${e.message}. The tab was switched to but Chrome still did not paint it; its window is probably minimized or fully covered. Call tab_activate with tabId=${tabId} and focusWindow=true, then try again (this brings Chrome to the front).`
+        );
+      } finally {
+        if (front && front.id !== tabId) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
+      }
+      if (front && front.id !== tabId) note = '\nnote: the tab was in the background, so it was switched to for a moment and then switched back.';
     }
     const t = await chrome.tabs.get(tabId);
-    return { __image: { data: shot.data, mimeType: 'image/jpeg' }, __text: `url: ${t.url}\ntitle: ${t.title}` };
+    return { __image: { data: shot.data, mimeType: 'image/jpeg' }, __text: `url: ${t.url}\ntitle: ${t.title}${note}` };
   },
 };

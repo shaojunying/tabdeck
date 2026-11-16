@@ -91,19 +91,25 @@ try {
   assert.equal(after.status, 'complete');
   console.log('ok  page_navigate：加载完成后返回');
 
+  const frontBefore = (await tool('tabs_list', { scope: 'all' })).tabs.find((x) => x.windowId === t.windowId && x.active);
   snap = await snapshot(tabId);
-  await tool('page_click', { tabId, ref: refOf(snap, 'Open child') });
-  await sleep(1000);
+  const clicked = await tool('page_click', { tabId, ref: refOf(snap, 'Open child') });
+  assert.ok(clicked.opened && clicked.opened.length === 1, 'page_click 的返回值里没有报出新开的标签页');
   let mine = await tool('tabs_list');
-  const child = mine.tabs.find((x) => x.url.includes('/child'));
-  assert.ok(child, '点链接开出的新标签页没有被自动收进 session');
+  const child = mine.tabs.find((x) => x.id === clicked.opened[0].id);
+  assert.ok(child && child.url.includes('/child'), '点链接开出的新标签页没有被收进 session');
   assert.equal(child.groupId, mine.group.id);
   assert.match(await snapshot(child.id), /child page/);
-  console.log('ok  自动收编：session 标签页点链接开出的新标签页自动进组，并且能直接操作');
+  const frontAfter = (await tool('tabs_list', { scope: 'all' })).tabs.find((x) => x.windowId === t.windowId && x.active);
+  assert.equal(frontAfter.id, frontBefore.id, '新标签页抢走了用户正在看的标签页');
+  console.log('ok  点链接开出的新标签页：返回值里报出、已进组、能直接操作，没有抢前台');
 
-  // 不切到前台，直接截后台标签页。
+  // 闲置的后台标签页直接截图：截不到时应当自动短暂切过去再切回来。
+  await sleep(3000);
   assert.equal((await tool('tabs_list')).tabs.find((x) => x.id === tabId).active, false);
   const shot = await raw('page_screenshot', { tabId });
+  const frontAfterShot = (await tool('tabs_list', { scope: 'all' })).tabs.find((x) => x.windowId === t.windowId && x.active);
+  assert.equal(frontAfterShot.id, frontBefore.id, '截图后没有切回用户原来看的标签页');
   const img = shot.find((c) => c.type === 'image');
   assert.ok(img && img.mimeType === 'image/jpeg' && img.data.length > 1000);
   const jpg = Buffer.from(img.data, 'base64');
