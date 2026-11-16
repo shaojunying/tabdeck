@@ -52,6 +52,8 @@ MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src
 
 ## 开发
 
+改了 `extension/` 下的代码要重载扩展才生效：`node scripts/reload.mjs`。它走 TabDeck 自己的通道（管道 → host → 扩展）让扩展重载自己，不碰调试端口，Chrome 不弹窗；脚本会等新一轮 service worker 连回来再退出。`--info` 只看当前 service worker 的 boot 标记。重载会清空 session 状态（`chrome.storage.session`），进行中的 session 会丢掉与标签页组的对应关系。`dev.reload` / `dev.info` 不是 MCP 工具，agent 调不到。
+
 `node scripts/sw-eval.mjs "<代码>"` 经 Chrome 的远程调试端口进到扩展的 service worker 里执行代码，`--reload` 重新加载扩展。每次连接 Chrome 都会弹窗要点 Allow。
 
 ## 排查

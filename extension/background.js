@@ -43,7 +43,23 @@ function locked(fn) {
   return p;
 }
 
+// ---------- 仅开发用：经扩展通道重载自己 ----------
+// 不是 MCP 工具，只有 scripts/reload.mjs 直接往管道里发。改完 extension/ 下的代码后用它生效，
+// 不必走调试端口（那条路每次都要用户点 Allow）。BOOT 每次 service worker 启动都变，用来确认确实换了一轮。
+const BOOT = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const dev = {
+  'dev.info': () => ({ boot: BOOT, version: chrome.runtime.getManifest().version }),
+  'dev.reload': () => {
+    setTimeout(() => chrome.runtime.reload(), 150); // 先让回复发出去
+    return { boot: BOOT, reloading: true };
+  },
+};
+
 function onHostMessage(msg) {
+  if (dev[msg.method]) {
+    port && port.postMessage({ id: msg.id, result: dev[msg.method]() });
+    return;
+  }
   locked(() => dispatch(msg)).then(
     (result) => port && port.postMessage({ id: msg.id, result: result === undefined ? null : result }),
     (e) => port && port.postMessage({ id: msg.id, error: (e && e.message) || String(e) })
