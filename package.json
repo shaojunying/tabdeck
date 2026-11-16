@@ -1,13 +1,13 @@
 {
   "name": "tabdeck",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "MCP server + Chrome extension that lets a local AI agent drive your real, logged-in Chrome: task-named tab groups, page snapshot, click, type, screenshot",
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "uninstall": "node scripts/setup.mjs --uninstall",
     "test": "node test/plumbing.test.mjs",
-    "test:live": "node test/live.test.mjs && node test/live2.test.mjs && node test/live3.test.mjs && node test/live4.test.mjs",
+    "test:live": "node test/live.test.mjs && node test/live2.test.mjs && node test/live3.test.mjs && node test/live4.test.mjs && node test/live5.test.mjs",
     "test:search": "node test/search.live.mjs"
   },
   "license": "MIT",

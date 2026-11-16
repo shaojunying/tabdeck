@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
-  <img alt="版本 0.4.0" src="https://img.shields.io/badge/version-0.4.0-8ab4f8">
+  <img alt="版本 0.4.1" src="https://img.shields.io/badge/version-0.4.1-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 扩展" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
   <img alt="零依赖" src="https://img.shields.io/badge/dependencies-0-brightgreen">

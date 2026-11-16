@@ -90,9 +90,17 @@ if (chrome.debugger) {
         break;
       case 'Network.requestWillBeSent': {
         const q = params.request || {};
-        const old = st.requests.get(params.requestId);
+        let old = st.requests.get(params.requestId);
+        if (old && params.redirectResponse) {
+          // 重定向时 Chrome 用同一个 requestId 再报一次。把被重定向的那一跳单独留一条，否则 301 / 302 就看不到了。
+          const s = params.redirectResponse;
+          Object.assign(old, { status: s.status, statusText: s.statusText, mime: s.mimeType, resHeaders: s.headers || {}, done: true, redirectedTo: q.url });
+          st.requests.delete(params.requestId);
+          st.requests.set(`${params.requestId}#${old.id}`, old);
+          old = { url: old.url };
+        }
         st.requests.set(params.requestId, {
-          id: old ? old.id : `r${++st.seq}`,
+          id: old && old.id ? old.id : `r${++st.seq}`,
           requestId: params.requestId,
           sessionId: src.sessionId,
           method: q.method,
@@ -265,14 +273,16 @@ const INTERACTIVE = new Set([
   'listbox', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'treeitem',
 ]);
 const FLAGS = ['checked', 'disabled', 'expanded', 'selected', 'required', 'pressed'];
-const MAX_SNAPSHOT = 60000;
+// 页面区域：给它们 ref，是为了 page_snapshot 能只读其中一块。
+const REGION = new Set(['main', 'navigation', 'banner', 'contentinfo', 'complementary', 'region', 'form', 'search', 'dialog', 'alertdialog', 'article', 'table', 'grid']);
+const MAX_SNAPSHOT = 40000;
 const SHOT_MAX_WIDTH = 1280;
 const NEW_TAB_WAIT_MS = 500;
 const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
 
 // tree = { nodes, prefix, frames }：nodes 是一个 frame 的无障碍树，prefix 是它的 ref 前缀，
 // frames 把 <iframe> 元素（backendDOMNodeId）映射到它里面那个 frame 的 tree，渲染时接在 iframe 那一行下面。
-function renderAxTree(tree) {
+function renderAxTree(tree, opts = {}) {
   const lines = [];
   let size = 0;
   let truncated = false;
@@ -280,13 +290,13 @@ function renderAxTree(tree) {
     const line = '  '.repeat(depth) + text;
     size += line.length + 1;
     if (size > MAX_SNAPSHOT) {
-      if (!truncated) lines.push('… (snapshot truncated)');
+      if (!truncated) lines.push(`… (snapshot cut at ${MAX_SNAPSHOT} characters: pass ref to read one part of the page, or interactive=true to list only the elements you can act on)`);
       truncated = true;
       return;
     }
     lines.push(line);
   };
-  const walkTree = (tr, baseDepth) => {
+  const walkTree = (tr, baseDepth, start) => {
     const byId = new Map(tr.nodes.map((n) => [n.nodeId, n]));
     const walk = (node, depth, parentName) => {
       if (!node || truncated) return;
@@ -295,7 +305,7 @@ function renderAxTree(tree) {
       if (role === 'InlineTextBox' || role === 'LineBreak') return;
       const kids = (d, pn) => (node.childIds || []).forEach((id) => walk(byId.get(id), d, pn));
       if (role === 'StaticText') {
-        if (name && name !== parentName) push(depth, `- text: ${clip(name, 300)}`);
+        if (name && name !== parentName && !opts.interactive) push(depth, `- text: ${clip(name, 300)}`);
         return;
       }
       const props = new Map((node.properties || []).map((p) => [p.name, p.value && p.value.value]));
@@ -306,7 +316,7 @@ function renderAxTree(tree) {
       let line = `- ${sub ? 'iframe' : role || 'generic'}`;
       if (name) line += ` "${clip(name, 200)}"`;
       if (role === 'heading' && props.get('level')) line += ` [level=${props.get('level')}]`;
-      if ((INTERACTIVE.has(role) || focusable) && node.backendDOMNodeId && role !== 'RootWebArea' && !sub) line += ` [ref=${tr.prefix}e${node.backendDOMNodeId}]`;
+      if ((INTERACTIVE.has(role) || focusable || REGION.has(role) || (role === 'image' && name)) && node.backendDOMNodeId && role !== 'RootWebArea' && !sub) line += ` [ref=${tr.prefix}e${node.backendDOMNodeId}]`;
       for (const f of FLAGS) {
         const v = props.get(f);
         if (v === true || v === 'true') line += ` [${f}]`;
@@ -314,13 +324,30 @@ function renderAxTree(tree) {
       }
       const value = node.value && node.value.value;
       if (value !== undefined && value !== '' && String(value) !== name) line += ` value="${clip(String(value), 200)}"`;
-      push(depth, line);
+      if (!opts.interactive) push(depth, line);
+      else if (line.includes('[ref=') || role === 'heading' || sub) push(0, line);
       if (sub) walkTree(sub, depth + 1);
       kids(depth + 1, name);
     };
-    walk(tr.nodes.find((n) => !n.parentId) || tr.nodes[0], baseDepth, '');
+    walk(start || tr.nodes.find((n) => !n.parentId) || tr.nodes[0], baseDepth, '');
   };
-  walkTree(tree, 0);
+  if (opts.ref) {
+    const m = /^(f\d+)?e(\d+)$/.exec(String(opts.ref));
+    const find = (tr) => {
+      const n = m && tr.prefix === (m[1] || '') && tr.nodes.find((x) => x.backendDOMNodeId === Number(m[2]));
+      if (n) return { tr, n };
+      for (const sub of tr.frames.values()) {
+        const hit = find(sub);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const hit = find(tree);
+    if (!hit) throw new Error(`No element with ref "${opts.ref}" on the page now. Call page_snapshot without ref to get the current refs.`);
+    walkTree(hit.tr, 0, hit.n);
+  } else {
+    walkTree(tree, 0);
+  }
   return lines.join('\n');
 }
 
@@ -492,9 +519,10 @@ async function actAndCollect(sess, sid, tabId, action, loadMs) {
     opened.push(id);
   }
   // 新标签页默认开在前台；用户原来在看别的标签页的话，切回去。
-  if (front && front.id !== tabId && opened.length) {
+  // 弹窗（prompt 等）也会把所在的标签页顶到前台。两种情况都切回用户原来在看的那个。
+  if (front) {
     const [now] = await chrome.tabs.query({ windowId: self.windowId, active: true });
-    if (now && opened.includes(now.id)) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
+    if (now && now.id !== front.id && (opened.includes(now.id) || now.id === tabId)) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
   }
   const result = withDialog(tabId, tabInfo(await waitLoaded(tabId, loadMs)));
   if (opened.length) {
@@ -543,7 +571,7 @@ const pageHandlers = {
     await ensureAttached(tabId);
     const tree = await collectTree(tabId, undefined, undefined, { left: MAX_IFRAMES });
     const t = await chrome.tabs.get(tabId);
-    return { __text: `url: ${t.url}\ntitle: ${t.title}\n\n${renderAxTree(tree)}` };
+    return { __text: `url: ${t.url}\ntitle: ${t.title}\n\n${renderAxTree(tree, { ref: p.ref, interactive: p.interactive === true })}` };
   },
 
   async page_click(sess, sid, p) {
@@ -595,28 +623,33 @@ const pageHandlers = {
     const dpr = (await cdp(tabId, 'Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true })).result.value || 1;
     const scale = Math.min(1, SHOT_MAX_WIDTH / (vv.clientWidth * dpr));
     const params = { format: 'jpeg', quality: 70, clip: { x: vv.pageX, y: vv.pageY, width: vv.clientWidth, height: vv.clientHeight, scale } };
+    // Chrome 只给窗口里的前台标签页出完整的画面。后台标签页直接截，有时超时，有时拿到低清或只画了一部分的旧画面
+    // （实测同一个页面时好时坏），所以一律在它的窗口里短暂切过去，截完马上切回用户原来看的那个，不动窗口焦点。
+    // 刚切过去的头一两张仍可能是低清的一帧，这种画面压成 JPEG 明显更小：连截三张，留最大的。
+    const self = await chrome.tabs.get(tabId);
+    const [front] = self.active ? [self] : await chrome.tabs.query({ windowId: self.windowId, active: true });
     let shot;
     let note = '';
+    if (!self.active) await chrome.tabs.update(tabId, { active: true });
     try {
-      // 后台标签页只有刚好在出新画面时才截得到（比如刚加载完）；闲着的后台标签页会一直等不到。
-      shot = await cdp(tabId, 'Page.captureScreenshot', params, 2500);
-    } catch (first) {
-      if (first instanceof DialogOpen) throw first;
-      // 退一步：在它的窗口里短暂切到这个标签页，截完马上切回用户原来看的那个。不动窗口焦点。
-      const self = await chrome.tabs.get(tabId);
-      const [front] = await chrome.tabs.query({ windowId: self.windowId, active: true });
-      await chrome.tabs.update(tabId, { active: true });
-      try {
-        shot = await cdp(tabId, 'Page.captureScreenshot', params, 8000);
-      } catch (e) {
-        throw new Error(
-          `${e.message}. The tab was switched to but Chrome still did not paint it; its window is probably minimized or fully covered. Call tab_activate with tabId=${tabId} and focusWindow=true, then try again (this brings Chrome to the front).`
-        );
-      } finally {
-        if (front && front.id !== tabId) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
+      shot = await cdp(tabId, 'Page.captureScreenshot', params, 8000);
+      for (let i = 0; i < 2 && !self.active; i++) {
+        await settle(300);
+        const next = await cdp(tabId, 'Page.captureScreenshot', params, 2500).catch((e) => {
+          if (e instanceof DialogOpen) throw e;
+          return shot;
+        });
+        if (next.data.length > shot.data.length) shot = next;
       }
-      if (front && front.id !== tabId) note = '\nnote: the tab was in the background, so it was switched to for a moment and then switched back.';
+    } catch (e) {
+      if (e instanceof DialogOpen) throw e;
+      throw new Error(
+        `${e.message}. Chrome did not paint the tab; its window is probably minimized or fully covered. Call tab_activate with tabId=${tabId} and focusWindow=true, then try again (this brings Chrome to the front).`
+      );
+    } finally {
+      if (!self.active && front && front.id !== tabId) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
     }
+    if (!self.active) note = '\nnote: the tab was in the background, so it was switched to for a moment and then switched back.';
     const t = await chrome.tabs.get(tabId);
     return { __image: { data: shot.data, mimeType: 'image/jpeg' }, __text: `url: ${t.url}\ntitle: ${t.title}${note}` };
   },
@@ -810,10 +843,11 @@ const pageHandlers = {
       if (!r) throw new Error(`No request "${p.requestId}". Call page_network without requestId to list the captured requests.`);
       const lines = [`${r.method} ${r.url}`, `type: ${r.type || '?'}`, `status: ${statusOf(r)}${r.statusText ? ' ' + r.statusText : ''}`];
       if (r.redirectedFrom) lines.push(`redirected from: ${r.redirectedFrom}`);
+      if (r.redirectedTo) lines.push(`redirected to: ${r.redirectedTo}`);
       lines.push('', 'request headers:', ...headerLines(r.reqHeaders));
       if (r.postData) lines.push('', 'request body:', clip(r.postData, 5000));
       if (r.resHeaders) lines.push('', 'response headers:', ...headerLines(r.resHeaders));
-      if (r.done && !r.failed) {
+      if (r.done && !r.failed && !r.redirectedTo) {
         try {
           const b = await cdp(tabId, 'Network.getResponseBody', { requestId: r.requestId }, 10000, r.sessionId);
           lines.push('', 'response body:', b.base64Encoded ? `(binary, about ${Math.round(b.body.length * 0.75)} bytes)` : clip(b.body, 20000));
@@ -837,7 +871,7 @@ const pageHandlers = {
       };
     }
     const head = `${items.length} request(s)${items.length > shown.length ? `, showing the last ${shown.length}` : ''}. Pass requestId for headers and body.`;
-    return { __text: [head, ...shown.map((r) => `${r.id}  ${r.method} ${statusOf(r)}  ${r.type || '?'}  ${clip(r.url, 300)}`)].join('\n') };
+    return { __text: [head, ...shown.map((r) => `${r.id}  ${r.method} ${statusOf(r)}  ${r.type || '?'}  ${clip(r.url, 300)}${r.redirectedTo ? '  -> ' + clip(r.redirectedTo, 200) : ''}`)].join('\n') };
   },
 
   async page_dialog(sess, sid, p) {

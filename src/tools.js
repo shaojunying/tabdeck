@@ -130,13 +130,21 @@ module.exports = [
   {
     name: 'page_snapshot',
     description:
-      "Read a page as a compact accessibility tree: one line per element with its role and name. Elements you can act on carry a ref like [ref=e42]; pass that ref to page_click / page_type. Refs stay valid until the page navigates or re-renders the element; take a new snapshot after the page changes. Only the main frame is covered (no iframes). Works on this session's tabs only.",
-    inputSchema: { type: 'object', properties: { tabId }, required: ['tabId'] },
+      "Read a page as a compact accessibility tree: one line per element with its role and name. Elements you can act on carry a ref like [ref=e42]; pass that ref to page_click / page_type. Refs stay valid until the page navigates or re-renders the element; take a new snapshot after the page changes. Iframes are included; elements inside a cross-site iframe have refs like f1e6. Page regions (main, navigation, form, table, dialog) and named images have refs too. A large page is cut at about 40,000 characters: pass ref to read only that element and what is inside it, or interactive=true to list only the elements you can act on. Works on this session's tabs only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        ref: { type: 'string', description: 'Read only this element and what is inside it, for example the ref of main, a form or a table.' },
+        interactive: { type: 'boolean', description: 'List only elements that have a ref, plus headings. Much shorter on large pages.' },
+      },
+      required: ['tabId'],
+    },
   },
   {
     name: 'page_click',
     description:
-      'Click an element by its ref from page_snapshot. Returns the tab afterwards (compare its url to see whether it navigated). If the click opened new tabs, they are listed under "opened"; they already belong to this session and stay in the background, so use their ids directly.',
+      'Click an element by its ref from page_snapshot. Returns the tab afterwards (compare its url to see whether it navigated). If the click opened new tabs, they are listed under "opened"; they already belong to this session and the tab the user was looking at stays in front, so use their ids directly.',
     inputSchema: {
       type: 'object',
       properties: { tabId, ref, double: { type: 'boolean', description: 'Double-click instead.' } },
@@ -162,7 +170,7 @@ module.exports = [
   {
     name: 'page_screenshot',
     description:
-      'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. The image is scaled down to at most 1280px wide. No need to activate the tab first: if a background tab cannot be captured, it is switched to for a moment and switched back automatically.',
+      'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. The image is scaled down to at most 1280px wide. No need to activate the tab first: a background tab is switched to for about a second and then switched back automatically (Chrome only paints the front tab of a window).',
     inputSchema: { type: 'object', properties: { tabId }, required: ['tabId'] },
   },
   {
@@ -177,7 +185,7 @@ module.exports = [
   },
   {
     name: 'page_hover',
-    description: 'Move the mouse over an element by its ref, to reveal hover menus or tooltips. Take a page_snapshot afterwards to see what appeared.',
+    description: 'Move the mouse over an element by its ref (links, buttons, inputs and named images have one), to reveal hover menus or tooltips. Take a page_snapshot afterwards to see what appeared.',
     inputSchema: { type: 'object', properties: { tabId, ref }, required: ['tabId', 'ref'] },
   },
   {
@@ -250,7 +258,7 @@ module.exports = [
   {
     name: 'page_network',
     description:
-      'List the network requests this tab has made (method, status, type, URL), or pass requestId (like "r12", from the list) for one request\'s headers, request body and response body. Only requests made after TabDeck first acted on the tab are recorded; reload with page_history to capture a full page load. Cookie and authorization headers are redacted.',
+      'List the network requests this tab has made (method, status, type, URL), or pass requestId (like "r12", from the list) for one request\'s headers, request body and response body. Only requests made after TabDeck first acted on the tab are recorded; reload with page_history to capture a full page load. A redirect is listed as its own request (status 301 / 302 and where it led) followed by the request it led to. Cookie and authorization headers are redacted.',
     inputSchema: {
       type: 'object',
       properties: {
