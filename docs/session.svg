@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" width="1280" height="560" role="img" aria-label="An example TabDeck session: the tool calls an agent makes and what comes back">
+  <defs>
+    <style>
+      text { font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, Menlo, monospace; font-size: 17px; }
+      .t { fill: #8ab4f8; font-weight: 700; }
+      .a { fill: #e6edf3; }
+      .r { fill: #8b949e; }
+      .g { fill: #81c995; }
+      .p { fill: #c58af9; }
+      .h { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; fill: #8b949e; }
+    </style>
+  </defs>
+  <rect width="1280" height="560" rx="14" fill="#0d1117" stroke="#30363d"/>
+  <rect width="1280" height="44" rx="14" fill="#161b22"/>
+  <rect y="30" width="1280" height="14" fill="#161b22"/>
+  <circle cx="26" cy="22" r="6" fill="#ff5f57"/>
+  <circle cx="46" cy="22" r="6" fill="#febc2e"/>
+  <circle cx="66" cy="22" r="6" fill="#28c840"/>
+  <text class="h" x="640" y="27" text-anchor="middle">agent ⇄ tabdeck (MCP) · example session</text>
+
+  <g transform="translate(40 86)">
+    <text y="0"><tspan class="g">●</tspan> <tspan class="t">session_start</tspan> <tspan class="a">name="Flight search"</tspan></text>
+    <text y="28" class="r">  └ tab group "Flight search" created, color picked to stand apart from your other groups</text>
+
+    <text y="72"><tspan class="g">●</tspan> <tspan class="t">tab_open</tspan> <tspan class="a">url="https://www.google.com/travel/flights"</tspan></text>
+    <text y="100" class="r">  └ tab 812 opened in the group, in the background</text>
+
+    <text y="144"><tspan class="g">●</tspan> <tspan class="t">page_snapshot</tspan> <tspan class="a">tabId=812</tspan></text>
+    <text y="172" class="r">  └ combobox "Where from?" <tspan class="p">[ref=e41]</tspan></text>
+    <text y="198" class="r">    combobox "Where to?" <tspan class="p">[ref=e47]</tspan></text>
+    <text y="224" class="r">    button "Search" <tspan class="p">[ref=e63]</tspan></text>
+
+    <text y="268"><tspan class="g">●</tspan> <tspan class="t">page_type</tspan> <tspan class="a">tabId=812 ref="e47" text="Tokyo" submit=true</tspan></text>
+
+    <text y="312"><tspan class="g">●</tspan> <tspan class="t">page_click</tspan> <tspan class="a">tabId=812 ref="e63"</tspan></text>
+    <text y="340" class="r">  └ opened: tab 815, kept in the group, your current tab stays in front</text>
+
+    <text y="384"><tspan class="g">●</tspan> <tspan class="t">page_screenshot</tspan> <tspan class="a">tabId=815</tspan></text>
+    <text y="412" class="r">  └ JPEG, at most 1280px wide, taken without bringing the tab forward</text>
+
+    <text y="456"><tspan class="g">●</tspan> <tspan class="t">session_end</tspan> <tspan class="a">mode="keep"</tspan></text>
+  </g>
+</svg>

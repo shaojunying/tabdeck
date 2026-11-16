@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-label="TabDeck: your real Chrome, driven by any AI agent, one tab group per task">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#1b2433"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8ab4f8"/>
+      <stop offset="0.5" stop-color="#c58af9"/>
+      <stop offset="1" stop-color="#81c995"/>
+    </linearGradient>
+    <style>
+      text { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .tab { font-size: 13px; fill: #bdc1c6; }
+      .chip { font-size: 13px; font-weight: 600; fill: #202124; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="420" rx="18" fill="url(#bg)"/>
+
+  <!-- logo: a deck of tabs -->
+  <g transform="translate(84 52)">
+    <rect x="28" y="0" width="72" height="50" rx="9" fill="#81c995" opacity="0.9"/>
+    <rect x="14" y="14" width="72" height="50" rx="9" fill="#c58af9" opacity="0.95"/>
+    <rect x="0" y="28" width="72" height="50" rx="9" fill="#8ab4f8"/>
+    <rect x="10" y="38" width="30" height="7" rx="3.5" fill="#0d1117" opacity="0.55"/>
+    <rect x="10" y="52" width="52" height="5" rx="2.5" fill="#0d1117" opacity="0.3"/>
+    <rect x="10" y="62" width="40" height="5" rx="2.5" fill="#0d1117" opacity="0.3"/>
+  </g>
+
+  <text x="214" y="104" font-size="64" font-weight="700" fill="url(#title)">TabDeck</text>
+  <text x="216" y="144" font-size="22" fill="#9da7b3">Your real, logged-in Chrome, driven by any AI agent over MCP.</text>
+  <text x="216" y="174" font-size="22" fill="#9da7b3">One named tab group per task.</text>
+
+  <!-- browser window -->
+  <g transform="translate(80 214)">
+    <rect width="1120" height="170" rx="12" fill="#202124" stroke="#3c4043"/>
+    <circle cx="22" cy="24" r="6" fill="#ff5f57"/>
+    <circle cx="42" cy="24" r="6" fill="#febc2e"/>
+    <circle cx="62" cy="24" r="6" fill="#28c840"/>
+
+    <!-- group 1: blue -->
+    <rect x="92" y="10" width="112" height="26" rx="7" fill="#8ab4f8"/>
+    <text class="chip" x="148" y="28" text-anchor="middle">Flight search</text>
+    <text class="tab" x="222" y="28">Google Flights</text>
+    <text class="tab" x="352" y="28">Kayak</text>
+    <rect x="212" y="42" width="196" height="3" rx="1.5" fill="#8ab4f8"/>
+
+    <!-- group 2: green, with the active tab -->
+    <rect x="424" y="10" width="90" height="26" rx="7" fill="#81c995"/>
+    <text class="chip" x="469" y="28" text-anchor="middle">PR review</text>
+    <path d="M522 46 V16 a8 8 0 0 1 8 -8 h148 a8 8 0 0 1 8 8 V46 Z" fill="#35363a"/>
+    <text class="tab" x="536" y="28" fill="#e8eaed" style="fill:#e8eaed">Pull request #128</text>
+    <text class="tab" x="704" y="28">CI run</text>
+    <rect x="522" y="42" width="236" height="3" rx="1.5" fill="#81c995"/>
+
+    <!-- group 3: purple -->
+    <rect x="774" y="10" width="78" height="26" rx="7" fill="#c58af9"/>
+    <text class="chip" x="813" y="28" text-anchor="middle">Invoices</text>
+    <text class="tab" x="870" y="28">Billing portal</text>
+    <rect x="860" y="42" width="116" height="3" rx="1.5" fill="#c58af9"/>
+
+    <!-- your own tab -->
+    <text class="tab" x="1000" y="28">Your inbox</text>
+    <text x="1090" y="30" font-size="18" fill="#9aa0a6">+</text>
+
+    <!-- toolbar -->
+    <rect x="0" y="46" width="1120" height="44" fill="#35363a"/>
+    <rect x="96" y="55" width="928" height="26" rx="13" fill="#202124"/>
+    <text x="116" y="73" font-size="13" fill="#9aa0a6">github.com/acme/app/pull/128</text>
+
+    <!-- page -->
+    <path d="M0 90 H1120 V158 a12 12 0 0 1 -12 12 H12 a12 12 0 0 1 -12 -12 Z" fill="#292a2d"/>
+    <text x="560" y="126" font-size="15" fill="#9aa0a6" text-anchor="middle">Three agent sessions, three groups. Agents work in background tabs and only touch their own.</text>
+    <text x="560" y="150" font-size="13" fill="#6e7681" text-anchor="middle">illustration</text>
+  </g>
+</svg>

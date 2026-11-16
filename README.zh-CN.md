@@ -1,8 +1,39 @@
-# TabDeck
+<p align="center">
+  <img src="docs/banner.svg" alt="TabDeck：让任意 AI agent 通过 MCP 操作你真实的、已登录的 Chrome，每个任务一个标签页组" width="100%">
+</p>
 
-让本地 AI agent 通过 MCP 管理 Chrome 的标签页和标签页组。每个 session（一个 MCP server 进程）有一个按任务命名的标签页组。
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
+  <img alt="版本 0.3.0" src="https://img.shields.io/badge/version-0.3.0-8ab4f8">
+  <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
+  <img alt="Chrome MV3 扩展" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
+  <img alt="Node 18+" src="https://img.shields.io/badge/node-%E2%89%A518-339933?logo=nodedotjs&logoColor=white">
+  <img alt="零依赖" src="https://img.shields.io/badge/dependencies-0-brightgreen">
+  <img alt="22 个工具" src="https://img.shields.io/badge/tools-22-fa903e">
+  <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-0078D4">
+  <a href="https://github.com/shaojunying/tabdeck/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/shaojunying/tabdeck?style=social"></a>
+</p>
 
-除了管理标签页和组，也能读页面、点击、输入、选下拉框、悬停、滚动、等待、执行脚本和截图。English: [README.md](README.md)
+<p align="center">
+  <a href="README.md">English</a> · <b>中文</b>
+</p>
+
+---
+
+**TabDeck 让本地 AI agent 通过 MCP 操作你真实的、已登录的 Chrome，每个任务放在一个按任务命名的标签页组里。**
+
+它由一个 Chrome 扩展和一个零依赖的 MCP server 组成。任何 MCP 客户端（Claude Code、Codex、Copilot CLI、Cursor 等）都能用：管理标签页和组，读页面、点击、输入、选下拉框、悬停、滚动、等待、执行脚本和截图。每个 session（一个 MCP server 进程）对应一个标签页组。
+
+> [!NOTE]
+> **灵感来自 [Claude in Chrome](https://claude.com/claude-in-chrome)。** TabDeck 是同一思路的开源、不绑定模型的实现：用扩展让 agent 在你自己的浏览器里、在它自己的标签页组里干活。本项目是独立项目，与 Anthropic 无关联，也未获其背书；只参考公开文档编写，没有使用该扩展的任何代码。
+
+## 一次 session 是什么样
+
+<p align="center">
+  <img src="docs/session.svg" alt="示例 session：session_start、tab_open、page_snapshot、page_type、page_click、page_screenshot、session_end" width="100%">
+</p>
+
+本页的图是行为示意图，不是真实浏览器的截图。
 
 ## 结构
 
@@ -10,7 +41,7 @@
 MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src/host.js ──native messaging──> extension/background.js
 ```
 
-- `extension/`：MV3 扩展，权限 `tabs`、`tabGroups`、`nativeMessaging`、`storage`、`alarms`。
+- `extension/`：MV3 扩展，权限 `tabs`、`tabGroups`、`nativeMessaging`、`storage`、`alarms`、`debugger`。
 - `src/host.js`：native messaging host，由 Chrome 拉起，在 `\\.\pipe\tabdeck-<用户名>` 上接受多个 MCP server。
 - `src/mcp-server.js`：MCP server，无 npm 依赖。
 - `src/tools.js`：工具定义。
