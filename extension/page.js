@@ -71,6 +71,7 @@ const INTERACTIVE = new Set([
 ]);
 const FLAGS = ['checked', 'disabled', 'expanded', 'selected', 'required', 'pressed'];
 const MAX_SNAPSHOT = 60000;
+const SHOT_MAX_WIDTH = 1280;
 const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
 
 function renderAxTree(nodes) {
@@ -127,11 +128,45 @@ async function centerOf(tabId, backendNodeId) {
   } catch (e) {
     throw new Error(`Element not found (${e.message}). The page may have changed; take a new page_snapshot.`);
   }
-  const { quads } = await cdp(tabId, 'DOM.getContentQuads', { backendNodeId });
-  if (!quads || !quads.length) throw new Error('Element is not visible, so it cannot be clicked.');
-  const q = quads[0];
-  return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 };
+  const { object } = await cdp(tabId, 'DOM.resolveNode', { backendNodeId });
+  // 找一个真的会落在目标元素上的点：逐个试它的每块区域；都被挡住就把它滚到视口中间再试一轮。
+  let blocker = '';
+  for (let round = 0; round < 2; round++) {
+    const { quads } = await cdp(tabId, 'DOM.getContentQuads', { backendNodeId });
+    if (!quads || !quads.length) throw new Error('Element is not visible, so it cannot be clicked.');
+    for (const q of quads.slice(0, 8)) {
+      const pt = { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 };
+      const { result } = await cdp(tabId, 'Runtime.callFunctionOn', {
+        objectId: object.objectId,
+        arguments: [{ value: pt.x }, { value: pt.y }],
+        returnByValue: true,
+        functionDeclaration: HIT_TEST,
+      });
+      if (result.value === 'ok') return pt;
+      blocker = result.value;
+    }
+    if (round === 0) {
+      await cdp(tabId, 'Runtime.callFunctionOn', {
+        objectId: object.objectId,
+        functionDeclaration: 'function(){ this.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); }',
+      });
+      await settle(150);
+    }
+  }
+  throw new Error(`Element is covered by ${blocker}, so a click would land on that instead. Dismiss or scroll past it, then take a new page_snapshot.`);
 }
+
+// 在页面里执行：(x, y) 处最上层的元素是不是目标自己（或它的子孙 / 包着它的 label 之类）。
+const HIT_TEST = `function(x, y) {
+  let top = document.elementFromPoint(x, y);
+  while (top && top.shadowRoot && top.shadowRoot.elementFromPoint(x, y) && top.shadowRoot.elementFromPoint(x, y) !== top) top = top.shadowRoot.elementFromPoint(x, y);
+  if (!top) return 'nothing (the point is outside the viewport)';
+  const inside = (a, b) => { for (let n = b; n; n = n.parentNode || n.host) if (n === a) return true; return false; };
+  if (inside(this, top) || inside(top, this)) return 'ok';
+  const cls = typeof top.className === 'string' && top.className.trim() ? '.' + top.className.trim().split(/\\s+/).slice(0, 2).join('.') : '';
+  const text = (top.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40);
+  return '<' + top.tagName.toLowerCase() + (top.id ? '#' + top.id : '') + cls + '>' + (text ? ' "' + text + '"' : '');
+}`;
 
 async function clickAt(tabId, { x, y }, clickCount = 1) {
   const base = { x, y, button: 'left', clickCount };
@@ -236,11 +271,22 @@ const pageHandlers = {
   async page_screenshot(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
     await ensureAttached(tabId);
+    // 高分屏上原始截图能到 5000 像素宽，模型看不了也没必要：缩到最宽 1280。
+    const { cssVisualViewport: vv } = await cdp(tabId, 'Page.getLayoutMetrics');
+    const dpr = (await cdp(tabId, 'Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true })).result.value || 1;
+    const scale = Math.min(1, SHOT_MAX_WIDTH / (vv.clientWidth * dpr));
     let shot;
     try {
-      shot = await cdp(tabId, 'Page.captureScreenshot', { format: 'jpeg', quality: 70 }, 8000);
+      shot = await cdp(
+        tabId,
+        'Page.captureScreenshot',
+        { format: 'jpeg', quality: 70, clip: { x: vv.pageX, y: vv.pageY, width: vv.clientWidth, height: vv.clientHeight, scale } },
+        8000
+      );
     } catch (e) {
-      throw new Error(`${e.message}. Chrome does not paint background tabs; call tab_activate on tab ${tabId} and try again.`);
+      throw new Error(
+        `${e.message}. Chrome only paints a tab that is the active tab of a visible window. Call tab_activate with tabId=${tabId} and focusWindow=true, then try again (this brings Chrome to the front).`
+      );
     }
     const t = await chrome.tabs.get(tabId);
     return { __image: { data: shot.data, mimeType: 'image/jpeg' }, __text: `url: ${t.url}\ntitle: ${t.title}` };

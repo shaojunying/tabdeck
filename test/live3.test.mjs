@@ -101,14 +101,29 @@ try {
   assert.match(await snapshot(child.id), /child page/);
   console.log('ok  自动收编：session 标签页点链接开出的新标签页自动进组，并且能直接操作');
 
-  const wasActive = before.tabs.find((x) => x.windowId === t.windowId && x.active);
-  await tool('tab_activate', { tabId });
+  // 不切到前台，直接截后台标签页。
+  assert.equal((await tool('tabs_list')).tabs.find((x) => x.id === tabId).active, false);
   const shot = await raw('page_screenshot', { tabId });
-  if (wasActive) await tool('tab_activate', { tabId: wasActive.id });
   const img = shot.find((c) => c.type === 'image');
   assert.ok(img && img.mimeType === 'image/jpeg' && img.data.length > 1000);
-  assert.equal(Buffer.from(img.data, 'base64').subarray(0, 2).toString('hex'), 'ffd8');
-  console.log(`ok  page_screenshot：拿到 JPEG（${Math.round((img.data.length * 3) / 4 / 1024)} KB）`);
+  const jpg = Buffer.from(img.data, 'base64');
+  assert.equal(jpg.subarray(0, 2).toString('hex'), 'ffd8');
+  // 从 JPEG 的 SOF 段读出宽高。
+  let w = 0;
+  let h = 0;
+  for (let i = 2; i < jpg.length - 9; ) {
+    if (jpg[i] !== 0xff) break;
+    const marker = jpg[i + 1];
+    const len = jpg.readUInt16BE(i + 2);
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      h = jpg.readUInt16BE(i + 5);
+      w = jpg.readUInt16BE(i + 7);
+      break;
+    }
+    i += 2 + len;
+  }
+  assert.ok(w > 100 && w <= 1290, `截图宽度 ${w} 不在预期范围`);
+  console.log(`ok  page_screenshot：后台标签页直接截到 JPEG，${w}x${h}，${Math.round(jpg.length / 1024)} KB`);
 
   await assert.rejects(raw('page_click', { tabId, ref: 'e999999999' }), /not found|take a new page_snapshot/i);
   console.log('ok  失效的 ref 给出明确报错');

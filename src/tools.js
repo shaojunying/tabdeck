@@ -144,7 +144,7 @@ module.exports = [
   {
     name: 'page_screenshot',
     description:
-      'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. Chrome only paints the foreground tab of a window, so call tab_activate first if it times out.',
+      'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. The image is scaled down to at most 1280px wide. Works on background tabs; if it times out, call tab_activate with focusWindow=true and retry.',
     inputSchema: { type: 'object', properties: { tabId }, required: ['tabId'] },
   },
 ];
