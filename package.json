@@ -7,7 +7,8 @@
     "setup": "node scripts/setup.mjs",
     "uninstall": "node scripts/setup.mjs --uninstall",
     "test": "node test/plumbing.test.mjs",
-    "test:live": "node test/live.test.mjs && node test/live2.test.mjs && node test/live3.test.mjs && node test/live4.test.mjs"
+    "test:live": "node test/live.test.mjs && node test/live2.test.mjs && node test/live3.test.mjs && node test/live4.test.mjs",
+    "test:search": "node test/search.live.mjs"
   },
   "license": "MIT",
   "keywords": [

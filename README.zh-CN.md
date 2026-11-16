@@ -112,6 +112,15 @@ node scripts/setup.mjs
 
 </details>
 
+<details>
+<summary><b>联网搜索</b>（1 个）</summary>
+
+| 工具 | 作用 |
+|---|---|
+| `web_search` | 不需要 API key 的联网搜索：在后台开一个标签页用 Google 搜（遇到验证码或没结果时换 Bing），返回最多 10 条结果的标题、链接和摘要，然后关掉标签页 |
+
+</details>
+
 ## 🧩 工作原理
 
 ```mermaid
@@ -133,6 +142,7 @@ flowchart LR
 - `page_network` 只能看到 TabDeck 第一次操作这个标签页之后发出的请求，cookie 和 authorization 请求头会打码。
 - `page_upload` 会拒绝看起来像凭据或密钥的文件。这只是防手滑，不是安全边界。
 - `page_eval` 会在 session 的标签页里执行任意 JavaScript。
+- `web_search` 读的是搜索引擎的结果页，所以是以你的身份搜（你的地区、语言和账号），结果页改版时可能失效。短时间内连续搜很多次可能触发验证码；`npm run test:search` 会在真实网站上检查它。
 - `chrome://` 页面和 Chrome 应用商店不能操作。
 
 <details>

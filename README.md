@@ -112,6 +112,15 @@ Uninstall with `node scripts/setup.mjs --uninstall`, then remove the extension.
 
 </details>
 
+<details>
+<summary><b>Web search</b> (1)</summary>
+
+| Tool | What it does |
+|---|---|
+| `web_search` | Search the web with no API key: opens a background tab on Google (Bing if Google shows a captcha or nothing), returns title, URL and snippet for up to 10 results, then closes the tab |
+
+</details>
+
 ## 🧩 How it works
 
 ```mermaid
@@ -133,6 +142,7 @@ Page actions use `chrome.debugger`, so Chrome shows its "started debugging this 
 - `page_network` only sees requests made after TabDeck first acted on the tab, and redacts cookie and authorization headers.
 - `page_upload` refuses files that look like credentials or keys. This is a guard against slips, not a security boundary.
 - `page_eval` runs arbitrary JavaScript in session tabs.
+- `web_search` reads the search engine's result page, so it runs as you (your region, language and account) and can break when that page's markup changes. Many searches in quick succession can trigger a captcha; `npm run test:search` checks it against the live sites.
 - `chrome://` pages and the Chrome Web Store cannot be driven.
 
 <details>

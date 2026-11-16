@@ -7,6 +7,7 @@ const COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'ora
 const BLANK = new Set(['', 'about:blank', 'chrome://newtab/', 'chrome://new-tab-page/']);
 
 importScripts('page.js'); // 页面操作：pageHandlers、detachTabs
+importScripts('search.js'); // 联网搜索：searchHandlers
 
 // ---------- 与 native host 的连接 ----------
 let port = null;
@@ -297,7 +298,7 @@ const handlers = {
   },
 };
 
-Object.assign(handlers, pageHandlers);
+Object.assign(handlers, pageHandlers, searchHandlers);
 
 async function dispatch({ sessionId: sid, method, params }) {
   const sessions = await loadSessions();

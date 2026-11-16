@@ -104,6 +104,23 @@ module.exports = [
     inputSchema: { type: 'object', properties: { mode: { type: 'string', enum: ['close', 'ungroup', 'keep'] } } },
   },
 
+  // ---- 联网搜索：自己开后台标签页、搜完就关 ----
+  {
+    name: 'web_search',
+    description:
+      "Search the web in the user's own Chrome and get the results as a list of title, URL and snippet. Needs no API key: it opens a background tab on the search engine, reads the result page and closes the tab. Google is tried first and Bing is used if Google shows a captcha or returns nothing. One call returns one result page (up to 10 results); pass page=2 for the next one. To read a result, open its URL with tab_open and page_snapshot. Leave a second or two between searches: many in quick succession can trigger a captcha.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The search query. Search operators such as site:github.com or "exact phrase" work.' },
+        count: { type: 'integer', description: 'How many results to return (1-10, default 10).' },
+        page: { type: 'integer', description: 'Result page, starting at 1 (default 1).' },
+        engine: { type: 'string', enum: ['auto', 'google', 'bing'], description: 'Default "auto": Google, then Bing if Google fails.' },
+      },
+      required: ['query'],
+    },
+  },
+
   // ---- 页面操作：只能用在本 session 的标签页上 ----
   {
     name: 'page_navigate',
