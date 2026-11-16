@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
-  <img alt="Version 0.3.0" src="https://img.shields.io/badge/version-0.3.0-8ab4f8">
+  <img alt="Version 0.4.0" src="https://img.shields.io/badge/version-0.4.0-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 extension" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
   <img alt="Zero dependencies" src="https://img.shields.io/badge/dependencies-0-brightgreen">
@@ -36,7 +36,8 @@
 - 🧲 **Tabs opened by a click stay in the group** and never steal the tab you are looking at.
 - 🌙 **Works in background tabs**: clicking, typing and screenshots need no focus.
 - 🔒 **Only touches its own tabs**, unless it explicitly adopts one of yours.
-- 🪶 **No dependencies**: about 1,200 lines of plain JavaScript.
+- 🔍 **Debugging built in**: console, network, dialogs, iframes and file uploads.
+- 🪶 **No dependencies**: about 1,700 lines of plain JavaScript.
 
 ## 🎬 Demo
 
@@ -87,22 +88,27 @@ Uninstall with `node scripts/setup.mjs --uninstall`, then remove the extension.
 </details>
 
 <details>
-<summary><b>Pages</b> (12)</summary>
+<summary><b>Pages</b> (17)</summary>
 
 | Tool | What it does |
 |---|---|
 | `page_navigate` | Load a URL and wait for it |
-| `page_snapshot` | Read the page as a compact accessibility tree with element refs |
+| `page_snapshot` | Read the page, iframes included, as a compact accessibility tree with element refs |
 | `page_click` | Click by ref; reports tabs the click opened |
 | `page_type` | Type into a field by ref, optional Enter |
 | `page_key` | Press a key |
 | `page_select` | Choose options in a native `<select>` |
+| `page_fill` | Fill several fields in one call: text, selects, checkboxes |
+| `page_upload` | Choose local files in a file input |
+| `page_dialog` | Accept or dismiss an alert, confirm or prompt |
 | `page_hover` | Hover an element |
 | `page_scroll` | Scroll by a screen, to top / bottom, or to an element |
 | `page_history` | Back, forward, reload |
 | `page_wait` | Wait for text to appear or disappear |
 | `page_eval` | Run a JavaScript expression in the page |
 | `page_screenshot` | JPEG of the visible area, at most 1280px wide |
+| `page_console` | Console output and uncaught errors, including earlier ones |
+| `page_network` | Requests the tab made; headers and bodies for one request |
 
 </details>
 
@@ -123,7 +129,9 @@ Page actions use `chrome.debugger`, so Chrome shows its "started debugging this 
 > [!WARNING]
 > The agent has the same access to a page as you, including your logins. Use it only with agents and prompts you trust; web pages can contain text written to mislead an agent.
 
-- Not yet: macOS / Linux, iframe content, file upload, console and network inspection, per-site allowlist.
+- Not yet: macOS / Linux, per-site allowlist, screen recording.
+- `page_network` only sees requests made after TabDeck first acted on the tab, and redacts cookie and authorization headers.
+- `page_upload` refuses files that look like credentials or keys. This is a guard against slips, not a security boundary.
 - `page_eval` runs arbitrary JavaScript in session tabs.
 - `chrome://` pages and the Chrome Web Store cannot be driven.
 

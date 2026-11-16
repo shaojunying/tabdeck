@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabDeck",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Lets a local AI agent drive your real Chrome over MCP: one task-named tab group per session, page reading, clicking and typing.",
   "minimum_chrome_version": "116",
   "permissions": [

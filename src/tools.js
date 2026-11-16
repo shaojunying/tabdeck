@@ -13,7 +13,7 @@ const color = {
 };
 
 const tabId = { type: 'integer', description: "A tab that belongs to this session (see tabs_list)." };
-const ref = { type: 'string', description: 'Element ref from page_snapshot, e.g. "e42".' };
+const ref = { type: 'string', description: 'Element ref from page_snapshot, e.g. "e42" (or "f1e42" for an element inside a cross-site iframe).' };
 
 module.exports = [
   {
@@ -197,5 +197,74 @@ module.exports = [
     description:
       'Run a JavaScript expression in the page and return its JSON-serializable value (promises are awaited). An escape hatch for things the other tools cannot do, such as reading a specific value or calling a page API; prefer page_snapshot / page_click / page_type for ordinary reading and acting.',
     inputSchema: { type: 'object', properties: { tabId, expression: { type: 'string' } }, required: ['tabId', 'expression'] },
+  },
+  {
+    name: 'page_fill',
+    description:
+      'Fill several form fields in one call. Each field is { ref, value }: text for inputs and textareas, the option label or value for a native <select>, true / false for checkboxes and radio buttons. Stops at the first field that fails and says which one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        fields: {
+          type: 'array',
+          minItems: 1,
+          items: { type: 'object', properties: { ref, value: { type: ['string', 'boolean', 'number'] } }, required: ['ref', 'value'] },
+        },
+      },
+      required: ['tabId', 'fields'],
+    },
+  },
+  {
+    name: 'page_console',
+    description:
+      "Read the page's console output and uncaught errors, oldest first, including messages logged before this call. level \"error\" shows only errors, \"warning\" shows warnings and errors; default is everything. Use it when a page misbehaves and you need to see why.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        level: { type: 'string', enum: ['all', 'warning', 'error'] },
+        limit: { type: 'integer', description: 'Show at most this many of the latest messages (default 100).' },
+        clear: { type: 'boolean', description: 'Empty the buffer after reading.' },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: 'page_network',
+    description:
+      'List the network requests this tab has made (method, status, type, URL), or pass requestId (like "r12", from the list) for one request\'s headers, request body and response body. Only requests made after TabDeck first acted on the tab are recorded; reload with page_history to capture a full page load. Cookie and authorization headers are redacted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        requestId: { type: 'string' },
+        filter: { type: 'string', description: 'Only requests whose URL contains this text.' },
+        failed: { type: 'boolean', description: 'Only failed requests and HTTP status 400 or higher.' },
+        limit: { type: 'integer', description: 'Show at most this many of the latest requests (default 50).' },
+        clear: { type: 'boolean', description: 'Empty the buffer after reading.' },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: 'page_dialog',
+    description:
+      'Accept or dismiss the JavaScript dialog (alert, confirm, prompt, beforeunload) that is open on a tab. Other page tools report it in their result as "dialog" and fail until it is handled. accept defaults to true; promptText fills a prompt before accepting.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, accept: { type: 'boolean' }, promptText: { type: 'string' } },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: 'page_upload',
+    description:
+      'Choose local files in a file input, as if the user had picked them in the file dialog. paths are absolute paths on this machine. Pass the ref of the file input, or omit ref to use the only file input on the page (they are often hidden behind an "Upload" button and missing from the snapshot). Only upload files the user asked you to upload.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, ref, paths: { type: 'array', items: { type: 'string' }, minItems: 1 } },
+      required: ['tabId', 'paths'],
+    },
   },
 ];

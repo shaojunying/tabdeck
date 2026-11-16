@@ -4,6 +4,8 @@
 // 工具调用经命名管道转给 native host，再到扩展。不依赖任何 npm 包。
 
 const net = require('net');
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const readline = require('readline');
 const { PIPE, VERSION } = require('./common');
@@ -79,6 +81,25 @@ async function callBrowser(method, params) {
   });
 }
 
+// page_upload 的路径在这里先检查：扩展看不到文件系统，文件不存在时 Chrome 也不会报错。
+// 明显是凭据的文件直接拒绝；这只是防手滑，挡不住有意绕过。
+const SENSITIVE = /(^|[\\/])(\.ssh|\.aws|\.azure|\.gnupg|\.kube|\.docker)([\\/]|$)|(^|[\\/])(\.env(\.[^\\/]*)?|\.netrc|\.npmrc|\.git-credentials|id_(rsa|dsa|ecdsa|ed25519)|credentials(\.json)?)$|\.(pem|pfx|p12|key|kdbx)$/i;
+function checkUploadPaths(args) {
+  const paths = args && args.paths;
+  if (!Array.isArray(paths) || !paths.length) throw new Error('paths must be a non-empty array of absolute file paths');
+  for (const p of paths) {
+    if (typeof p !== 'string' || !path.isAbsolute(p)) throw new Error(`"${p}" is not an absolute path.`);
+    if (SENSITIVE.test(p)) throw new Error(`"${p}" looks like a credential or key file; TabDeck does not upload those.`);
+    let st;
+    try {
+      st = fs.statSync(p);
+    } catch {
+      throw new Error(`File not found: ${p}`);
+    }
+    if (!st.isFile()) throw new Error(`Not a file: ${p}`);
+  }
+}
+
 function send(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
@@ -103,7 +124,9 @@ async function onRpc(msg) {
       result = { content: [{ type: 'text', text: `Error: unknown tool "${name}"` }], isError: true };
     } else {
       try {
-        const r = await callBrowser(name, (params && params.arguments) || {});
+        const args = (params && params.arguments) || {};
+        if (name === 'page_upload') checkUploadPaths(args);
+        const r = await callBrowser(name, args);
         // 扩展可以用 __text / __image 直接给出文本和图片，其余结果按 JSON 输出。
         if (r && (r.__text !== undefined || r.__image)) {
           const content = [];

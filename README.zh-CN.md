@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
-  <img alt="版本 0.3.0" src="https://img.shields.io/badge/version-0.3.0-8ab4f8">
+  <img alt="版本 0.4.0" src="https://img.shields.io/badge/version-0.4.0-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 扩展" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
   <img alt="零依赖" src="https://img.shields.io/badge/dependencies-0-brightgreen">
@@ -36,7 +36,8 @@
 - 🧲 **点击开出的新标签页留在组里**，不抢你正在看的标签页。
 - 🌙 **在后台标签页里干活**：点击、输入、截图都不用切到前台。
 - 🔒 **只动自己的标签页**，要动你的标签页必须先明确收编。
-- 🪶 **零依赖**：约 1200 行纯 JavaScript。
+- 🔍 **自带调试能力**：console、网络请求、弹窗、iframe、文件上传。
+- 🪶 **零依赖**：约 1700 行纯 JavaScript。
 
 ## 🎬 演示
 
@@ -87,22 +88,27 @@ node scripts/setup.mjs
 </details>
 
 <details>
-<summary><b>页面操作</b>（12 个）</summary>
+<summary><b>页面操作</b>（17 个）</summary>
 
 | 工具 | 作用 |
 |---|---|
 | `page_navigate` | 打开网址并等加载完 |
-| `page_snapshot` | 把页面读成紧凑的无障碍树，可操作的元素带 ref |
+| `page_snapshot` | 把页面（含 iframe）读成紧凑的无障碍树，可操作的元素带 ref |
 | `page_click` | 按 ref 点击，并报告点击开出的新标签页 |
 | `page_type` | 按 ref 输入文字，可选回车 |
 | `page_key` | 按一个键 |
 | `page_select` | 在原生下拉框里选中选项 |
+| `page_fill` | 一次填多个字段：文本框、下拉框、复选框 |
+| `page_upload` | 在文件输入框里选中本地文件 |
+| `page_dialog` | 确认或取消 alert、confirm、prompt 弹窗 |
 | `page_hover` | 悬停到元素上 |
 | `page_scroll` | 滚一屏、到顶 / 到底，或滚到某个元素 |
 | `page_history` | 后退、前进、刷新 |
 | `page_wait` | 等某段文字出现或消失 |
 | `page_eval` | 在页面里执行一段 JavaScript |
 | `page_screenshot` | 截当前可见区域，JPEG，最宽 1280 像素 |
+| `page_console` | console 输出和未捕获的异常，包括之前的记录 |
+| `page_network` | 标签页发出的请求；单个请求的请求头、响应头和正文 |
 
 </details>
 
@@ -123,7 +129,9 @@ flowchart LR
 > [!WARNING]
 > agent 对页面的访问权限和你一样，包括你的登录态。只给你信任的 agent 和提示词使用；网页里可能有专门误导 agent 的文字。
 
-- 还不支持：macOS / Linux、iframe 里的内容、文件上传、console 和网络查看、按站点授权。
+- 还不支持：macOS / Linux、按站点授权、录屏。
+- `page_network` 只能看到 TabDeck 第一次操作这个标签页之后发出的请求，cookie 和 authorization 请求头会打码。
+- `page_upload` 会拒绝看起来像凭据或密钥的文件。这只是防手滑，不是安全边界。
 - `page_eval` 会在 session 的标签页里执行任意 JavaScript。
 - `chrome://` 页面和 Chrome 应用商店不能操作。
 
