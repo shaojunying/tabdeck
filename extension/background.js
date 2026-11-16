@@ -218,10 +218,17 @@ const handlers = {
       const win = await chrome.windows.create(p.url ? { url: p.url } : {});
       tab = win.tabs[0];
     } else {
-      tab = await chrome.tabs.create({ windowId, active: !!p.active, ...(p.url ? { url: p.url } : {}) });
+      // 带网址时先开空白页、挂上调试器再跳转：这样页面第一段脚本运行前，"不拉起桌面 App"的守卫已经装好。
+      tab = await chrome.tabs.create({ windowId, active: !!p.active, ...(p.url ? { url: 'about:blank' } : {}) });
+      if (p.url) {
+        await ensureAttached(tab.id).catch(() => {}); // 挂不上不影响打开
+        await chrome.tabs.update(tab.id, { url: p.url });
+      }
     }
     await putInSessionGroup(sess, sid, [tab.id]);
-    return tabInfo(await chrome.tabs.get(tab.id));
+    const t = await chrome.tabs.get(tab.id);
+    // 跳转刚开始时 url 还是 about:blank，目标地址在 pendingUrl 里。
+    return { ...tabInfo(t), url: t.pendingUrl || t.url || '' };
   },
 
   async tabs_adopt(sess, sid, p) {

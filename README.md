@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
-  <img alt="Version 0.4.1" src="https://img.shields.io/badge/version-0.4.1-8ab4f8">
+  <img alt="Version 0.4.2" src="https://img.shields.io/badge/version-0.4.2-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 extension" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
   <img alt="Zero dependencies" src="https://img.shields.io/badge/dependencies-0-brightgreen">
@@ -36,6 +36,7 @@
 - 🧲 **Tabs opened by a click stay in the group** and never steal the tab you are looking at.
 - 🌙 **Works in background tabs**: clicking, typing and screenshots need no focus.
 - 🔒 **Only touches its own tabs**, unless it explicitly adopts one of yours.
+- 🚫 **No "Open the app?" prompts**: pages cannot launch desktop apps (`msteams:`, `zoommtg:`, `slack:`, `mailto:` ...), so the agent stays in the web version and nobody has to click a browser prompt.
 - 🔍 **Debugging built in**: console, network, dialogs, iframes and file uploads.
 - 🪶 **No dependencies**: about 1,700 lines of plain JavaScript.
 

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
-  <img alt="版本 0.4.1" src="https://img.shields.io/badge/version-0.4.1-8ab4f8">
+  <img alt="版本 0.4.2" src="https://img.shields.io/badge/version-0.4.2-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 扩展" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
   <img alt="零依赖" src="https://img.shields.io/badge/dependencies-0-brightgreen">
@@ -36,6 +36,7 @@
 - 🧲 **点击开出的新标签页留在组里**，不抢你正在看的标签页。
 - 🌙 **在后台标签页里干活**：点击、输入、截图都不用切到前台。
 - 🔒 **只动自己的标签页**，要动你的标签页必须先明确收编。
+- 🚫 **不弹"要打开 App 吗？"**：页面拉不起桌面 App（`msteams:`、`zoommtg:`、`slack:`、`mailto:` 等），agent 留在网页版，不需要有人去点浏览器弹窗。
 - 🔍 **自带调试能力**：console、网络请求、弹窗、iframe、文件上传。
 - 🪶 **零依赖**：约 1700 行纯 JavaScript。
 

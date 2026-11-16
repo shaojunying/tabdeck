@@ -159,10 +159,44 @@ class DialogOpen extends Error {}
 const dialogText = (d) =>
   `A JavaScript ${d.type} dialog is open on this tab: "${d.message.slice(0, 300)}". The page is blocked until you call page_dialog to accept or dismiss it.`;
 
+// 不让页面拉起桌面 App：网页用 msteams: / zoommtg: / slack: / mailto: 这类外部协议跳转时，Chrome 会弹
+// "要打开 XXX 吗？"。那是浏览器自己的界面，调试器点不掉，只能让跳转不发生。这段脚本在每个文档的页面脚本
+// 之前运行，拦三条路：本框架的跳转（location / 链接 / 表单，经 Navigation API）、iframe 的 src、window.open。
+// 被拦下的地址记进 console（page_console 里能看到），页面留在原地，通常会有"改用网页版"的按钮可点。
+const NO_APP_LAUNCH = `(() => {
+  if (window.__tabdeckNoAppLaunch) return;
+  Object.defineProperty(window, '__tabdeckNoAppLaunch', { value: true });
+  const WEB = /^(https?|about|blob|data|javascript|file|ftp|wss?|filesystem|chrome|chrome-extension|devtools|view-source):$/i;
+  const external = (u) => { try { return !WEB.test(new URL(String(u), document.baseURI).protocol); } catch (e) { return false; } };
+  const note = (u) => { try { console.warn('[TabDeck] blocked app launch: ' + String(u).slice(0, 300)); } catch (e) {} };
+  if (window.navigation) {
+    navigation.addEventListener('navigate', (e) => {
+      if (e.cancelable && external(e.destination.url)) { e.preventDefault(); note(e.destination.url); }
+    });
+  }
+  const d = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+  if (d && d.set) {
+    Object.defineProperty(HTMLIFrameElement.prototype, 'src', { ...d, set(v) { if (external(v)) note(v); else d.set.call(this, v); } });
+  }
+  const setAttr = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name, value) {
+    if (this instanceof HTMLIFrameElement && String(name).toLowerCase() === 'src' && external(value)) return note(value);
+    return setAttr.call(this, name, value);
+  };
+  const open = window.open;
+  window.open = function (url, ...rest) {
+    if (url != null && url !== '' && external(url)) { note(url); return null; }
+    return open.call(this, url, ...rest);
+  };
+})()`;
+
 // 给一个调试会话（标签页本身或它的某个跨站 iframe）打开需要的事件。
 async function initSession(tabId, sessionId, withRuntime) {
   const on = (m, p) => cdp(tabId, m, p, 5000, sessionId).catch(() => {});
   await on('Page.enable');
+  // 以后每个新文档都先装上守卫；当前已经加载的文档补装一次（脚本自带防重复）。
+  await on('Page.addScriptToEvaluateOnNewDocument', { source: NO_APP_LAUNCH });
+  await on('Runtime.evaluate', { expression: NO_APP_LAUNCH });
   await on('Log.enable');
   await on('Network.enable');
   if (withRuntime) await on('Runtime.enable');

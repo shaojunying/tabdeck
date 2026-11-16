@@ -42,7 +42,7 @@ module.exports = [
   {
     name: 'tab_open',
     description:
-      "Open a new tab inside this session's tab group (the group is created on first use). The tab opens in the background unless active=true.",
+      "Open a new tab inside this session's tab group (the group is created on first use). The tab opens in the background unless active=true. Pages in this session's tabs cannot launch desktop apps: a jump to an app link (msteams:, zoommtg:, slack:, mailto: ...) is blocked, so Chrome's \"Open the app?\" prompt never appears, and it is logged in page_console. The page stays where it is: use its \"continue in the browser\" / \"use the web app\" option.",
     inputSchema: {
       type: 'object',
       properties: { url: { type: 'string', description: 'URL to open. Omit for a blank tab.' }, active: { type: 'boolean' } },
