@@ -85,6 +85,22 @@ try {
   await assert.rejects(main.tool('tabs_close', { tabIds: [o1.id] }), /do not belong/);
   console.log('ok  两个 session 各有各的组，互相不能关对方的标签页');
 
+  // ---- 外观：重名加序号，没指定颜色时互不相同 ----
+  const twin = await client();
+  await twin.tool('session_start', { name: 'TabDeck 自测 2' });
+  const w1 = await open(twin, { url: 'https://example.com/?twin' });
+  snap = await all();
+  const gMain = snap.groups.find((g) => g.id === t1.groupId);
+  const gTwin = snap.groups.find((g) => g.id === w1.groupId);
+  assert.equal(gMain.title, 'TabDeck 自测 2');
+  assert.equal(gTwin.title, 'TabDeck 自测 2 2');
+  assert.notEqual(gTwin.color, gMain.color);
+  assert.ok(!before.groups.some((g) => g.color === gMain.color) || before.groups.length >= 8, '自动挑的颜色撞上了已有的组');
+  await twin.tool('session_end', { mode: 'close' });
+  leftovers.delete(w1.id);
+  await twin.exit();
+  console.log(`ok  外观：重名的组自动加序号，自动颜色互不相同（${gMain.color} / ${gTwin.color}）`);
+
   // ---- session_end ungroup：标签页留下，组解散 ----
   const endU = await main.tool('session_end', { mode: 'ungroup' });
   assert.deepEqual(endU.tabs, [t1.id]);

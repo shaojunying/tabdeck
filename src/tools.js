@@ -19,7 +19,14 @@ module.exports = [
       "Name this session's tab group after the task you are doing (e.g. \"查发票\"). Call it once at the start of a browser task; calling it again renames the group. The group itself appears when the first tab is opened or adopted.",
     inputSchema: {
       type: 'object',
-      properties: { name: { type: 'string', description: 'Short task name shown on the tab group.' }, color },
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'The tab group title. Keep it short and specific so the user can tell groups apart at a glance: 2-6 Chinese characters or 1-3 words naming the task ("查发票", "PR 45029", "顺义成交"). No prefix, no tool or model name, no generic words like "任务" or "browser". If another group already has this title a number is appended.',
+        },
+        color: { ...color, description: 'Usually omit: an unused color is picked automatically so groups do not look alike.' },
+      },
       required: ['name'],
     },
   },

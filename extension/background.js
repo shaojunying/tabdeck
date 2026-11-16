@@ -74,12 +74,28 @@ function saveSessions(sessions) {
   return chrome.storage.session.set({ sessions });
 }
 
-function defaultColor(sid) {
+// 组的外观要一眼能区分：
+// 颜色没指定时，挑当前浏览器里用得最少的那个（平手时按 sessionId 哈希错开），不用灰色。
+async function pickColor(sid, ownGroupId) {
+  const used = new Map();
+  for (const g of await chrome.tabGroups.query({})) if (g.id !== ownGroupId) used.set(g.color, (used.get(g.color) || 0) + 1);
   let h = 0;
   for (const c of sid) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return COLORS[h % COLORS.length];
+  let best = null;
+  for (let i = 0; i < COLORS.length; i++) {
+    const color = COLORS[(h + i) % COLORS.length];
+    const n = used.get(color) || 0;
+    if (!best || n < best.n) best = { color, n };
+  }
+  return best.color;
 }
-const groupTitle = (sess) => sess.name || 'Agent';
+// 标题就是任务名，不加任何前缀；没起名叫 "Agent"。和别的组重名时在后面加序号（"查发票 2"）。
+async function groupTitle(sess) {
+  const base = sess.name || 'Agent';
+  const taken = new Set((await chrome.tabGroups.query({})).filter((g) => g.id !== sess.groupId).map((g) => g.title));
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
+}
 
 async function liveGroup(sess) {
   if (sess.groupId == null) return null;
@@ -113,7 +129,8 @@ async function putInSessionGroup(sess, sid, tabIds) {
   } else {
     const first = await chrome.tabs.get(tabIds[0]);
     sess.groupId = await chrome.tabs.group({ tabIds, createProperties: { windowId: first.windowId } });
-    await chrome.tabGroups.update(sess.groupId, { title: groupTitle(sess), color: sess.color || defaultColor(sid) });
+    if (!sess.color) sess.color = await pickColor(sid, sess.groupId);
+    await chrome.tabGroups.update(sess.groupId, { title: await groupTitle(sess), color: sess.color });
   }
   sess.extra = sess.extra.filter((id) => !tabIds.includes(id));
 }
@@ -169,7 +186,7 @@ const handlers = {
     sess.name = String(p.name);
     if (p.color) sess.color = p.color;
     if (await liveGroup(sess)) {
-      await chrome.tabGroups.update(sess.groupId, { title: groupTitle(sess), ...(p.color ? { color: p.color } : {}) });
+      await chrome.tabGroups.update(sess.groupId, { title: await groupTitle(sess), ...(p.color ? { color: p.color } : {}) });
     }
     return sessionInfo(sess);
   },
