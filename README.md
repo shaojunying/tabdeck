@@ -1,0 +1,55 @@
+# TabDeck
+
+让本地 AI agent 通过 MCP 管理 Chrome 的标签页和标签页组。每个 session（一个 MCP server 进程）有一个按任务命名的标签页组。
+
+当前是第一阶段：只管标签页和组，还不能操作页面内容（点击、输入、截图在后面的阶段）。
+
+## 结构
+
+```
+MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src/host.js ──native messaging──> extension/background.js
+```
+
+- `extension/`：MV3 扩展，权限 `tabs`、`tabGroups`、`nativeMessaging`、`storage`、`alarms`。
+- `src/host.js`：native messaging host，由 Chrome 拉起，在 `\\.\pipe\tabdeck-<用户名>` 上接受多个 MCP server。
+- `src/mcp-server.js`：MCP server，无 npm 依赖。
+- `src/tools.js`：工具定义。
+
+## 安装（Windows）
+
+1. `node scripts/setup.mjs`：给扩展写入固定 key（ID 不随目录变化）、生成 `native-host/`、注册 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.tabdeck.host`。
+2. Chrome 打开 `chrome://extensions`，开“开发者模式”，“加载已解压的扩展程序”，选 `extension/` 目录。
+3. 在 MCP 客户端里加一个 stdio server：`node <本目录>\src\mcp-server.js`。
+
+卸载：`node scripts/setup.mjs --uninstall`（删注册表项），再到 `chrome://extensions` 移除扩展。
+
+## 工具
+
+| 工具 | 作用 |
+|---|---|
+| `session_start` | 给本 session 的组起名（按任务命名） |
+| `tabs_list` | 列出本 session 的标签页；`scope=all` 列出全部标签页和组 |
+| `tab_open` | 在本 session 的组里开新标签页 |
+| `tabs_adopt` | 把已有标签页收进本 session 的组 |
+| `tabs_close` | 关标签页，默认只能关本 session 的 |
+| `tab_activate` | 切到某个标签页 |
+| `tabs_group` / `tabs_ungroup` | 通用整理：进组、出组 |
+| `group_set` | 改组名、颜色、折叠状态 |
+| `session_end` | 结束：关掉全部 / 只解散组 / 原样保留 |
+
+## 行为约定
+
+- session 的标签页 = 组里的标签页。用户把标签页拖进组就等于交给 session，拖出去就收回。
+- session 的标签页打开的新标签页会自动收进同一个组；弹窗窗口里的标签页进不了组，只记在 session 名下。
+- MCP server 进程退出时，只有当 session 的标签页全是空白页才自动关掉，其余原样保留。
+- 关标签页如果会把窗口关空，会先补一个空白页。
+
+## 测试
+
+`node test/plumbing.test.mjs`：不需要 Chrome，脚本扮演扩展，验证 MCP server 和 host 之间的通信链路。扩展里的标签页逻辑要在真 Chrome 里测。
+
+## 排查
+
+- host 日志：`%TEMP%\tabdeck-host.log`。
+- 扩展日志：`chrome://extensions` 里点 TabDeck 的“Service Worker”。
+- 工具报 `Cannot reach the TabDeck extension`：Chrome 没开、扩展没加载，或者没跑过 setup。扩展每 30 秒会重试连接 host。

@@ -1,0 +1,11 @@
+{
+  "name": "tabdeck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server + Chrome extension that lets a local AI agent manage tabs and tab groups",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "uninstall": "node scripts/setup.mjs --uninstall",
+    "test": "node test/plumbing.test.mjs"
+  }
+}
