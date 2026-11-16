@@ -358,3 +358,119 @@ const pageHandlers = {
     return { __image: { data: shot.data, mimeType: 'image/jpeg' }, __text: `url: ${t.url}\ntitle: ${t.title}${note}` };
   },
 };
+
+// ---------- 更多页面操作：下拉框、悬停、滚动、前进后退、等待、执行脚本 ----------
+async function resolveRef(tabId, ref) {
+  try {
+    return (await cdp(tabId, 'DOM.resolveNode', { backendNodeId: refToNode(ref) })).object.objectId;
+  } catch (e) {
+    if (/Invalid ref/.test(e.message)) throw e;
+    throw new Error(`Element not found (${e.message}). The page may have changed; take a new page_snapshot.`);
+  }
+}
+
+Object.assign(pageHandlers, {
+  async page_hover(sess, sid, p) {
+    const tabId = await ownedTab(sess, p);
+    await ensureAttached(tabId);
+    const { x, y } = await centerOf(tabId, refToNode(p.ref));
+    await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await settle(300);
+    return tabInfo(await chrome.tabs.get(tabId));
+  },
+
+  async page_select(sess, sid, p) {
+    const tabId = await ownedTab(sess, p);
+    if (!Array.isArray(p.values) || !p.values.length) throw new Error('values must be a non-empty array of option labels or values');
+    await ensureAttached(tabId);
+    const { result } = await cdp(tabId, 'Runtime.callFunctionOn', {
+      objectId: await resolveRef(tabId, p.ref),
+      arguments: [{ value: p.values.map(String) }],
+      returnByValue: true,
+      functionDeclaration: `function(wanted) {
+        if (this.tagName !== 'SELECT') return { error: 'Element is a <' + this.tagName.toLowerCase() + '>, not a <select>. For custom dropdowns, click it and then click the option.' };
+        const opts = Array.from(this.options);
+        const norm = (s) => String(s).replace(/\\s+/g, ' ').trim();
+        const picked = [];
+        for (const w of wanted) {
+          const o = opts.find((o) => o.value === w) || opts.find((o) => norm(o.label) === norm(w)) || opts.find((o) => norm(o.text) === norm(w));
+          if (!o) return { error: 'No option "' + w + '". Available: ' + opts.map((o) => norm(o.text)).slice(0, 30).join(' | ') };
+          picked.push(o);
+        }
+        if (!this.multiple && picked.length > 1) return { error: 'This select takes a single value.' };
+        for (const o of opts) o.selected = picked.includes(o);
+        this.dispatchEvent(new Event('input', { bubbles: true }));
+        this.dispatchEvent(new Event('change', { bubbles: true }));
+        return { selected: picked.map((o) => norm(o.text)) };
+      }`,
+    });
+    if (result.value && result.value.error) throw new Error(result.value.error);
+    return result.value;
+  },
+
+  async page_scroll(sess, sid, p) {
+    const tabId = await ownedTab(sess, p);
+    await ensureAttached(tabId);
+    if (p.ref) {
+      await cdp(tabId, 'Runtime.callFunctionOn', {
+        objectId: await resolveRef(tabId, p.ref),
+        functionDeclaration: 'function(){ this.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); }',
+      });
+    } else {
+      const dir = p.direction || 'down';
+      const expr = {
+        down: 'window.scrollBy(0, innerHeight * 0.85)',
+        up: 'window.scrollBy(0, -innerHeight * 0.85)',
+        top: 'window.scrollTo(0, 0)',
+        bottom: 'window.scrollTo(0, document.documentElement.scrollHeight)',
+      }[dir];
+      if (!expr) throw new Error('direction must be one of: down, up, top, bottom');
+      await cdp(tabId, 'Runtime.evaluate', { expression: expr });
+    }
+    await settle(300);
+    const { result } = await cdp(tabId, 'Runtime.evaluate', {
+      expression: '({ scrollY: Math.round(scrollY), viewportHeight: innerHeight, pageHeight: document.documentElement.scrollHeight })',
+      returnByValue: true,
+    });
+    return result.value;
+  },
+
+  async page_history(sess, sid, p) {
+    const tabId = await ownedTab(sess, p);
+    if (p.direction === 'forward') await chrome.tabs.goForward(tabId);
+    else if (p.direction === 'back' || !p.direction) await chrome.tabs.goBack(tabId);
+    else if (p.direction === 'reload') await chrome.tabs.reload(tabId);
+    else throw new Error('direction must be one of: back, forward, reload');
+    await settle(300);
+    return tabInfo(await waitLoaded(tabId, 15000));
+  },
+
+  async page_wait(sess, sid, p) {
+    const tabId = await ownedTab(sess, p);
+    if (!p.text && !p.textGone) throw new Error('Pass text (wait until it appears) or textGone (wait until it disappears).');
+    await ensureAttached(tabId);
+    const ms = Math.min(Math.max(Number(p.timeoutMs) || 10000, 500), 15000);
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const { result } = await cdp(tabId, 'Runtime.evaluate', { expression: 'document.body ? document.body.innerText : ""', returnByValue: true });
+      const body = String(result.value || '');
+      const ok = p.text ? body.includes(p.text) : !body.includes(p.textGone);
+      if (ok) return { found: true, waitedMs: ms - Math.max(deadline - Date.now(), 0) };
+      if (Date.now() > deadline) throw new Error(`Timed out after ${ms / 1000}s waiting for ${p.text ? `"${p.text}" to appear` : `"${p.textGone}" to disappear`}.`);
+      await settle(250);
+    }
+  },
+
+  async page_eval(sess, sid, p) {
+    const tabId = await ownedTab(sess, p);
+    if (typeof p.expression !== 'string' || !p.expression.trim()) throw new Error('expression is required');
+    await ensureAttached(tabId);
+    const r = await cdp(tabId, 'Runtime.evaluate', { expression: p.expression, awaitPromise: true, returnByValue: true, userGesture: true }, 15000);
+    if (r.exceptionDetails) {
+      const ex = r.exceptionDetails.exception;
+      throw new Error(`Page script threw: ${(ex && (ex.description || ex.value)) || r.exceptionDetails.text}`);
+    }
+    const text = r.result.value === undefined ? String(r.result.description || 'undefined') : JSON.stringify(r.result.value, null, 2);
+    return { __text: text.length > 60000 ? text.slice(0, 60000) + '\n… (truncated)' : text };
+  },
+});

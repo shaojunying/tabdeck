@@ -148,4 +148,54 @@ module.exports = [
       'Take a screenshot of the visible part of the page. Prefer page_snapshot for reading and acting; use this when layout or visuals matter. The image is scaled down to at most 1280px wide. No need to activate the tab first: if a background tab cannot be captured, it is switched to for a moment and switched back automatically.',
     inputSchema: { type: 'object', properties: { tabId }, required: ['tabId'] },
   },
+  {
+    name: 'page_select',
+    description:
+      'Choose options in a native <select> dropdown by its ref. values are option labels or values. For custom (non-<select>) dropdowns, use page_click on the dropdown and then on the option.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, ref, values: { type: 'array', items: { type: 'string' }, minItems: 1 } },
+      required: ['tabId', 'ref', 'values'],
+    },
+  },
+  {
+    name: 'page_hover',
+    description: 'Move the mouse over an element by its ref, to reveal hover menus or tooltips. Take a page_snapshot afterwards to see what appeared.',
+    inputSchema: { type: 'object', properties: { tabId, ref }, required: ['tabId', 'ref'] },
+  },
+  {
+    name: 'page_scroll',
+    description:
+      'Scroll the page: direction "down" / "up" (most of a screen), "top" or "bottom"; or pass ref to bring that element into view. Returns the scroll position and page height. page_snapshot already covers the whole page, so scroll mainly before a screenshot or to trigger lazy loading.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, direction: { type: 'string', enum: ['down', 'up', 'top', 'bottom'] }, ref },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: 'page_history',
+    description: 'Go back or forward in the tab history, or reload the page, and wait for it to load.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, direction: { type: 'string', enum: ['back', 'forward', 'reload'] } },
+      required: ['tabId', 'direction'],
+    },
+  },
+  {
+    name: 'page_wait',
+    description:
+      'Wait until some text appears on the page (text) or disappears from it (textGone), for example after an action that loads content asynchronously. Fails after timeoutMs (default 10000, max 15000).',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, text: { type: 'string' }, textGone: { type: 'string' }, timeoutMs: { type: 'integer' } },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: 'page_eval',
+    description:
+      'Run a JavaScript expression in the page and return its JSON-serializable value (promises are awaited). An escape hatch for things the other tools cannot do, such as reading a specific value or calling a page API; prefer page_snapshot / page_click / page_type for ordinary reading and acting.',
+    inputSchema: { type: 'object', properties: { tabId, expression: { type: 'string' } }, required: ['tabId', 'expression'] },
+  },
 ];

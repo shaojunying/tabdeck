@@ -15,7 +15,11 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>TabDeck test</title>
 <a href="/child" target="_blank">Open child</a>
 <input aria-label="Name" id="q" value="old">
 <button onclick="document.title='clicked:'+document.getElementById('q').value">Apply</button>
-<form action="/submitted"><input name="s" aria-label="Search"></form>`;
+<form action="/submitted"><input name="s" aria-label="Search"></form>
+<select aria-label="Fruit" id="fruit" onchange="this.dataset.changed=this.value"><option value="a">Apple</option><option value="b">Banana</option></select>
+<button id="hov" onmouseover="this.textContent='Hovered'">Hover me</button>
+<button onclick="setTimeout(()=>document.body.insertAdjacentHTML('beforeend','<p>Loaded later</p>'),600)">Load more</button>
+<div style="height:3000px"></div><p id="end">The end</p>`;
 const server = http.createServer((req, res) => {
   res.setHeader('content-type', 'text/html; charset=utf-8');
   if (req.url.startsWith('/child')) res.end('<!doctype html><title>Child</title><p>child page</p>');
@@ -130,6 +134,44 @@ try {
   }
   assert.ok(w > 100 && w <= 1290, `截图宽度 ${w} 不在预期范围`);
   console.log(`ok  page_screenshot：后台标签页直接截到 JPEG，${w}x${h}，${Math.round(jpg.length / 1024)} KB`);
+
+  // ---- 下拉框、悬停、等待、滚动、执行脚本、前进后退 ----
+  snap = await snapshot(tabId);
+  const sel = await tool('page_select', { tabId, ref: refOf(snap, 'Fruit'), values: ['Banana'] });
+  assert.deepEqual(sel.selected, ['Banana']);
+  const evalText = async (expression) => (await raw('page_eval', { tabId, expression }))[0].text;
+  assert.equal(await evalText('document.getElementById("fruit").dataset.changed'), '"b"');
+  await assert.rejects(raw('page_select', { tabId, ref: refOf(snap, 'Fruit'), values: ['Cherry'] }), /No option "Cherry".*Apple \| Banana/);
+  await assert.rejects(raw('page_select', { tabId, ref: refOf(snap, 'Apply'), values: ['x'] }), /not a <select>/);
+  console.log('ok  page_select：按文字选中并触发 change；选项不存在 / 不是下拉框时报错清楚');
+
+  await tool('page_hover', { tabId, ref: refOf(snap, 'Hover me') });
+  assert.match(await snapshot(tabId), /button "Hovered"/);
+  console.log('ok  page_hover：页面收到悬停');
+
+  await tool('page_click', { tabId, ref: refOf(snap, 'Load more') });
+  const waited = await tool('page_wait', { tabId, text: 'Loaded later' });
+  assert.equal(waited.found, true);
+  await assert.rejects(raw('page_wait', { tabId, text: 'never shows up', timeoutMs: 800 }), /Timed out/);
+  console.log('ok  page_wait：等到异步出现的文字；等不到时超时报错');
+
+  const bottom = await tool('page_scroll', { tabId, direction: 'bottom' });
+  assert.ok(bottom.scrollY > 1000 && bottom.pageHeight > 3000);
+  const top = await tool('page_scroll', { tabId, direction: 'top' });
+  assert.equal(top.scrollY, 0);
+  console.log(`ok  page_scroll：到底（scrollY=${bottom.scrollY}）再回顶`);
+
+  assert.equal(await evalText('1 + 1'), '2');
+  assert.equal(await evalText('Promise.resolve({ a: [1, 2] })'), JSON.stringify({ a: [1, 2] }, null, 2));
+  await assert.rejects(raw('page_eval', { tabId, expression: 'nope()' }), /Page script threw/);
+  console.log('ok  page_eval：返回值、Promise、异常都正确');
+
+  await tool('page_navigate', { tabId, url: base + '/submitted' });
+  const back = await tool('page_history', { tabId, direction: 'back' });
+  assert.equal(back.title, 'TabDeck test');
+  const fwd = await tool('page_history', { tabId, direction: 'forward' });
+  assert.equal(fwd.title, 'Submitted');
+  console.log('ok  page_history：后退、前进');
 
   await assert.rejects(raw('page_click', { tabId, ref: 'e999999999' }), /not found|take a new page_snapshot/i);
   console.log('ok  失效的 ref 给出明确报错');

@@ -1,85 +1,122 @@
 # TabDeck
 
-让本地 AI agent 通过 MCP 管理 Chrome 的标签页和标签页组。每个 session（一个 MCP server 进程）有一个按任务命名的标签页组。
+**Let a local AI agent drive your real, logged-in Chrome over MCP, with every task kept in its own named tab group.**
 
-当前是第一阶段：只管标签页和组，还不能操作页面内容（点击、输入、截图在后面的阶段）。
+TabDeck is a small Chrome extension plus a zero-dependency MCP server. Any MCP client (Claude Code, Codex, Copilot CLI, Cursor, ...) can open tabs, read pages, click, type and take screenshots in the browser you already use, with your existing logins, and without a permission prompt on every connection.
 
-## 结构
+[中文说明](README.zh-CN.md)
+
+## Why
+
+Existing options each miss something:
+
+| | Uses your logged-in Chrome | No prompt per connection | Works with any model / client | Keeps agent tabs organised |
+|---|---|---|---|---|
+| Remote-debugging based MCPs | yes | no (Chrome asks every time) | yes | no |
+| Extension-relay MCPs | yes | yes | yes | fixed group name, new tabs escape the group |
+| Vendor browser extensions | yes | yes | tied to one vendor / subscription | yes |
+| **TabDeck** | yes | yes | yes | yes |
+
+What TabDeck does differently:
+
+- **One tab group per session, named after the task.** No fixed prefix. Colors are picked so that concurrent groups do not look alike, duplicate names get a number.
+- **Tabs opened by a click stay in the group** and are reported back to the agent, without stealing the tab you are looking at.
+- **The agent works in background tabs.** Clicking, typing and screenshots do not need the tab in front.
+- **The agent can only touch its own tabs.** To act on a tab you already have open, it must adopt it explicitly.
+- **Polite cleanup.** When the client exits, blank tabs are closed and tabs with content are left for you.
+- **No npm dependencies**, about a thousand lines of plain JavaScript you can read in one sitting.
+
+## How it works
 
 ```
-MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src/host.js ──native messaging──> extension/background.js
+MCP client ──stdio──> src/mcp-server.js ──named pipe──> src/host.js ──native messaging──> extension/
 ```
 
-- `extension/`：MV3 扩展，权限 `tabs`、`tabGroups`、`nativeMessaging`、`storage`、`alarms`。
-- `src/host.js`：native messaging host，由 Chrome 拉起，在 `\\.\pipe\tabdeck-<用户名>` 上接受多个 MCP server。
-- `src/mcp-server.js`：MCP server，无 npm 依赖。
-- `src/tools.js`：工具定义。
+The extension talks to a local host process through Chrome native messaging. Each MCP server process is one session. Page actions go through `chrome.debugger`, so Chrome shows its "TabDeck started debugging this browser" bar while a session is acting on a page.
 
-## 安装（Windows）
+## Install
 
-1. `node scripts/setup.mjs`：给扩展写入固定 key（ID 不随目录变化）、生成 `native-host/`、注册 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.tabdeck.host`。
-   - 如果是在打包应用里的 shell 跑（比如 Claude 桌面版的 session），要加 `--via-wmi`：这类 shell 写 `HKCU` 会被重定向到应用私有的注册表视图，Chrome 看不到，扩展会报 `Specified native messaging host not found`。
-2. Chrome 打开 `chrome://extensions`，开“开发者模式”，“加载已解压的扩展程序”，选 `extension/` 目录。
-3. 在 MCP 客户端里加一个 stdio server：`node <本目录>\src\mcp-server.js`。
+Requirements: Chrome 116+, Node.js 18+. **Windows only for now** (the host registration and the pipe are Windows-specific; macOS / Linux support is not written yet).
 
-卸载：`node scripts/setup.mjs --uninstall`（删注册表项），再到 `chrome://extensions` 移除扩展。
+1. Clone this repository.
+2. Register the native messaging host:
 
-## 工具
+   ```bash
+   node scripts/setup.mjs
+   ```
 
-| 工具 | 作用 |
+   If you run this from a shell inside a packaged (MSIX) app, such as a desktop AI app's built-in terminal, add `--via-wmi`. Those shells write `HKCU` into a private registry view that Chrome cannot see, and the extension then reports `Specified native messaging host not found`.
+3. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `extension/` folder. The extension id should be `akjjdilmpbopldfdljbhimajnkbhjhep`.
+4. Add the MCP server to your client. It is a stdio server:
+
+   ```json
+   {
+     "mcpServers": {
+       "tabdeck": { "type": "stdio", "command": "node", "args": ["C:\\path\\to\\tabdeck\\src\\mcp-server.js"] }
+     }
+   }
+   ```
+
+   Claude Code: `claude mcp add tabdeck -- node C:\path\to\tabdeck\src\mcp-server.js`
+
+Uninstall: `node scripts/setup.mjs --uninstall`, then remove the extension in `chrome://extensions`.
+
+## Tools
+
+Tabs and groups:
+
+| Tool | What it does |
 |---|---|
-| `session_start` | 给本 session 的组起名（按任务命名） |
-| `tabs_list` | 列出本 session 的标签页；`scope=all` 列出全部标签页和组 |
-| `tab_open` | 在本 session 的组里开新标签页 |
-| `tabs_adopt` | 把已有标签页收进本 session 的组 |
-| `tabs_close` | 关标签页，默认只能关本 session 的 |
-| `tab_activate` | 切到某个标签页 |
-| `tabs_group` / `tabs_ungroup` | 通用整理：进组、出组 |
-| `group_set` | 改组名、颜色、折叠状态 |
-| `session_end` | 结束：关掉全部 / 只解散组 / 原样保留 |
+| `session_start` | Name this session's tab group after the task |
+| `tabs_list` | List this session's tabs, or every tab and group with `scope="all"` |
+| `tab_open` | Open a tab in the session's group (in the background by default) |
+| `tabs_adopt` | Take over existing tabs by moving them into the session's group |
+| `tabs_close` | Close tabs; only the session's own unless `force=true` |
+| `tab_activate` | Switch to a tab |
+| `tabs_group` / `tabs_ungroup` | General tab organising |
+| `group_set` | Rename, recolor, collapse or expand a group |
+| `session_end` | Finish: close everything, dissolve the group, or keep it |
 
-## 页面操作（第二阶段）
+Pages (session tabs only):
 
-只能用在本 session 的标签页上（别的标签页先 `tabs_adopt`）。经 `chrome.debugger` 实现，用的时候 Chrome 顶部会出现"TabDeck 已开始调试此浏览器"的提示条，`session_end` 或 MCP server 退出后松开。
+| Tool | What it does |
+|---|---|
+| `page_navigate` | Load a URL and wait for it |
+| `page_snapshot` | Read the page as a compact accessibility tree; actionable elements carry a ref such as `e42` |
+| `page_click` | Click by ref; reports tabs the click opened |
+| `page_type` | Type into a field by ref; replaces by default, optional Enter |
+| `page_key` | Press a key (Enter, Tab, Escape, arrows, ...) |
+| `page_select` | Choose options in a native `<select>` |
+| `page_hover` | Hover an element |
+| `page_scroll` | Scroll by a screen, to top / bottom, or to an element |
+| `page_history` | Back, forward, reload |
+| `page_wait` | Wait for text to appear or disappear |
+| `page_eval` | Run a JavaScript expression in the page |
+| `page_screenshot` | JPEG of the visible area, at most 1280px wide |
 
-| 工具 | 作用 |
-| --- | --- |
-| `page_navigate` | 在 session 的标签页里打开网址，等加载完 |
-| `page_snapshot` | 把页面读成紧凑的无障碍树文本；可操作的元素带 `[ref=e42]` |
-| `page_click` | 按 ref 点击（`double` 双击），返回点击后的标签页状态 |
-| `page_type` | 按 ref 输入文字，默认替换原内容（`append` 追加，`submit` 回车） |
-| `page_key` | 按一个键（Enter、Tab、Escape、方向键等） |
-| `page_screenshot` | 截当前可见区域（JPEG） |
+## Limits
 
-- 后台标签页也能点击和输入，不用切到前台（attach 时开了焦点模拟；不开的话后台标签页和被挡住的窗口收不到鼠标事件）。
-- 点击前会做命中检查：目标被别的元素挡住时换一块区域或把它滚到视口中间再试，还是点不到就报错说明被什么挡住，不会悄悄点到别的东西上。
-- 截图缩到最宽 1280 像素（高分屏原图能到 5000 多像素宽，模型看不了）。实测后台标签页也能截；万一超时，`tab_activate` 带 `focusWindow=true` 后重试。
-- 还不支持：iframe 里的内容、文件上传、下拉框选择、悬停、执行脚本、console 和网络（第三阶段）。
+- Windows only.
+- Main frame only: content inside iframes is not in the snapshot.
+- No file upload, no console or network inspection yet.
+- `chrome.debugger` cannot attach to `chrome://` pages or the Chrome Web Store.
 
-## 行为约定
+## Security notes
 
-- session 的标签页 = 组里的标签页。用户把标签页拖进组就等于交给 session，拖出去就收回。
-- session 的标签页打开的新标签页会自动收进同一个组；弹窗窗口里的标签页进不了组，只记在 session 名下。
-- MCP server 进程退出时，只有当 session 的标签页全是空白页才自动关掉，其余原样保留。
-- 关标签页如果会把窗口关空，会先补一个空白页。
-- 组的外观以"简洁、一眼能区分"为准：标题就是任务名，不加任何前缀（没起名时叫 `Agent`），和别的组重名时自动加序号；没指定颜色时挑浏览器里用得最少的颜色，不用灰色。
+- The agent gets the same access to a page as you have, including your logged-in sessions. Only use it with agents and prompts you trust, and remember that web pages can contain text written to mislead an agent.
+- `page_eval` runs arbitrary JavaScript in session tabs.
+- The named pipe uses default permissions; the tool is meant for a single-user machine.
+- There is no per-site allowlist yet.
 
-## 测试
+## Development
 
-- `node test/plumbing.test.mjs`：不需要 Chrome，脚本扮演扩展，验证 MCP server 和 host 之间的通信链路。
-- `node test/live.test.mjs`：需要 Chrome 开着且扩展已加载。会临时开两个标签页，把工具调一遍，测完自己关掉。
-- `node test/live2.test.mjs`：同样需要 Chrome。测 `tab_activate`、`session_end` 的 ungroup / keep、两个 session 互不干扰、MCP server 退出后的清理（只有空白页才自动关）。
-- `node test/live3.test.mjs`：页面操作。自己起一个本地网页当靶子，测快照、输入、按键、点击、表单提交、导航、截图、失效 ref 的报错，以及点链接开出的新标签页自动进组。
-- 与 Playwright 扩展的组共存已实测（它的组在场时两个测试都通过，组没被动）。
+- `node test/plumbing.test.mjs` checks the MCP server and host without Chrome.
+- `node test/live.test.mjs`, `live2`, `live3` run against your real Chrome. They open a few temporary tabs (the page tests use a local test page) and close them afterwards.
+- `node scripts/reload.mjs` reloads the extension over TabDeck's own channel after you change files under `extension/`, with no Chrome prompt.
+- `node scripts/sw-eval.mjs "<code>"` runs code inside the extension's service worker through the remote debugging port (Chrome asks for permission each time).
 
-## 开发
+## Troubleshooting
 
-改了 `extension/` 下的代码要重载扩展才生效：`node scripts/reload.mjs`。它走 TabDeck 自己的通道（管道 → host → 扩展）让扩展重载自己，不碰调试端口，Chrome 不弹窗；脚本会等新一轮 service worker 连回来再退出。`--info` 只看当前 service worker 的 boot 标记。重载会清空 session 状态（`chrome.storage.session`），进行中的 session 会丢掉与标签页组的对应关系。`dev.reload` / `dev.info` 不是 MCP 工具，agent 调不到。
-
-`node scripts/sw-eval.mjs "<代码>"` 经 Chrome 的远程调试端口进到扩展的 service worker 里执行代码，`--reload` 重新加载扩展。每次连接 Chrome 都会弹窗要点 Allow。
-
-## 排查
-
-- host 日志：`native-host/host.log`。
-- 扩展日志：`chrome://extensions` 里点 TabDeck 的“Service Worker”。
-- 工具报 `Cannot reach the TabDeck extension`：Chrome 没开、扩展没加载，或者没跑过 setup。扩展每 30 秒会重试连接 host。
+- `Cannot reach the TabDeck extension`: Chrome is not running, the extension is not loaded, or setup has not been run. The extension retries the host every 30 seconds.
+- `Specified native messaging host not found` in the service worker console: the registry entry is not visible to Chrome; see the `--via-wmi` note above.
+- Host log: `native-host/host.log`. Extension log: the "service worker" link on the TabDeck card in `chrome://extensions`.

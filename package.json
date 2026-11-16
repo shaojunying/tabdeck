@@ -1,11 +1,26 @@
 {
   "name": "tabdeck",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "MCP server + Chrome extension that lets a local AI agent manage tabs and tab groups",
+  "description": "MCP server + Chrome extension that lets a local AI agent drive your real, logged-in Chrome: task-named tab groups, page snapshot, click, type, screenshot",
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "uninstall": "node scripts/setup.mjs --uninstall",
-    "test": "node test/plumbing.test.mjs"
-  }
+    "test": "node test/plumbing.test.mjs",
+    "test:live": "node test/live.test.mjs && node test/live2.test.mjs && node test/live3.test.mjs"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "chrome-extension",
+    "browser-automation",
+    "ai-agent",
+    "tab-groups",
+    "native-messaging",
+    "claude-code",
+    "codex",
+    "copilot"
+  ]
 }
