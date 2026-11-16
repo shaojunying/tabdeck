@@ -18,9 +18,23 @@ if (process.platform !== 'win32') {
   process.exit(1);
 }
 
+// --via-wmi：让 WMI 服务代为执行 reg 命令。
+// 从打包应用（比如 Claude 桌面版）里的 shell 直接写 HKCU 会被重定向到应用私有的注册表视图，
+// Chrome 看不到，表现为扩展报 "Specified native messaging host not found"。经 WMI 起的进程不在容器里。
+const viaWmi = process.argv.includes('--via-wmi');
+function reg(args) {
+  if (!viaWmi) {
+    execFileSync('reg', args, { stdio: 'ignore' });
+    return;
+  }
+  const cmdLine = 'reg ' + args.map((a) => (/[\s]/.test(a) ? `"${a}"` : a)).join(' ');
+  const ps = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${cmdLine.replace(/'/g, "''")}' }; if ($r.ReturnValue -ne 0) { exit 1 }; Wait-Process -Id $r.ProcessId -Timeout 10 -ErrorAction SilentlyContinue`;
+  execFileSync('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' });
+}
+
 if (process.argv.includes('--uninstall')) {
   try {
-    execFileSync('reg', ['delete', REG_KEY, '/f'], { stdio: 'ignore' });
+    reg(['delete', REG_KEY, '/f']);
     console.log('已删除注册表项', REG_KEY);
   } catch {
     console.log('注册表项不存在，无需删除');
@@ -67,7 +81,7 @@ fs.writeFileSync(
 );
 
 // 3. 注册
-execFileSync('reg', ['add', REG_KEY, '/ve', '/t', 'REG_SZ', '/d', hostManifestPath, '/f'], { stdio: 'ignore' });
+reg(['add', REG_KEY, '/ve', '/t', 'REG_SZ', '/d', hostManifestPath, '/f']);
 
 console.log('扩展 ID      :', extensionId);
 console.log('扩展目录     :', path.join(root, 'extension'));

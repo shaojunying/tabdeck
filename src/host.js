@@ -11,7 +11,8 @@ const path = require('path');
 const readline = require('readline');
 const { PIPE } = require('./common');
 
-const LOG = path.join(os.tmpdir(), 'tabdeck-host.log');
+// 日志放在项目的 native-host/ 下（已 gitignore）。不放 %TEMP%：打包应用里的 shell 看到的 AppData 可能是重定向过的。
+const LOG = path.join(__dirname, '..', 'native-host', 'host.log');
 function log(...a) {
   try {
     fs.appendFileSync(LOG, `${new Date().toISOString()} [${process.pid}] ${a.join(' ')}\n`);

@@ -18,6 +18,7 @@ MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src
 ## 安装（Windows）
 
 1. `node scripts/setup.mjs`：给扩展写入固定 key（ID 不随目录变化）、生成 `native-host/`、注册 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.tabdeck.host`。
+   - 如果是在打包应用里的 shell 跑（比如 Claude 桌面版的 session），要加 `--via-wmi`：这类 shell 写 `HKCU` 会被重定向到应用私有的注册表视图，Chrome 看不到，扩展会报 `Specified native messaging host not found`。
 2. Chrome 打开 `chrome://extensions`，开“开发者模式”，“加载已解压的扩展程序”，选 `extension/` 目录。
 3. 在 MCP 客户端里加一个 stdio server：`node <本目录>\src\mcp-server.js`。
 
@@ -46,10 +47,15 @@ MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src
 
 ## 测试
 
-`node test/plumbing.test.mjs`：不需要 Chrome，脚本扮演扩展，验证 MCP server 和 host 之间的通信链路。扩展里的标签页逻辑要在真 Chrome 里测。
+- `node test/plumbing.test.mjs`：不需要 Chrome，脚本扮演扩展，验证 MCP server 和 host 之间的通信链路。
+- `node test/live.test.mjs`：需要 Chrome 开着且扩展已加载。会临时开两个标签页，把工具调一遍，测完自己关掉。还没覆盖：自动收编新标签页、MCP server 退出后的清理、`tab_activate`、与其他扩展的组共存。
+
+## 开发
+
+`node scripts/sw-eval.mjs "<代码>"` 经 Chrome 的远程调试端口进到扩展的 service worker 里执行代码，`--reload` 重新加载扩展。每次连接 Chrome 都会弹窗要点 Allow。
 
 ## 排查
 
-- host 日志：`%TEMP%\tabdeck-host.log`。
+- host 日志：`native-host/host.log`。
 - 扩展日志：`chrome://extensions` 里点 TabDeck 的“Service Worker”。
 - 工具报 `Cannot reach the TabDeck extension`：Chrome 没开、扩展没加载，或者没跑过 setup。扩展每 30 秒会重试连接 host。
