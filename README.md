@@ -48,7 +48,9 @@ MCP 客户端 ──stdio──> src/mcp-server.js ──命名管道──> src
 ## 测试
 
 - `node test/plumbing.test.mjs`：不需要 Chrome，脚本扮演扩展，验证 MCP server 和 host 之间的通信链路。
-- `node test/live.test.mjs`：需要 Chrome 开着且扩展已加载。会临时开两个标签页，把工具调一遍，测完自己关掉。还没覆盖：自动收编新标签页、MCP server 退出后的清理、`tab_activate`、与其他扩展的组共存。
+- `node test/live.test.mjs`：需要 Chrome 开着且扩展已加载。会临时开两个标签页，把工具调一遍，测完自己关掉。
+- `node test/live2.test.mjs`：同样需要 Chrome。测 `tab_activate`、`session_end` 的 ungroup / keep、两个 session 互不干扰、MCP server 退出后的清理（只有空白页才自动关）。
+- 还没覆盖：自动收编新标签页（要能在页面里点链接，等第二阶段）。与 Playwright 扩展的组共存已实测（它的组在场时两个测试都通过，组没被动）。
 
 ## 开发
 
