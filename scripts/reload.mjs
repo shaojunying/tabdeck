@@ -3,7 +3,7 @@
 // 走 TabDeck 自己的通道（命名管道 -> native host -> 扩展），不碰调试端口，所以 Chrome 不会弹 Allow。
 // 用法：node scripts/reload.mjs          重载并等新一轮 service worker 连回来
 //       node scripts/reload.mjs --info   只看当前 service worker 的 boot 标记
-// 注意：重载会清空 chrome.storage.session，进行中的 session 会丢掉与标签页组的对应关系。
+// session 记录存在 chrome.storage.local，重载后进行中的 session 照样认得自己的标签页组。
 
 import net from 'node:net';
 import readline from 'node:readline';
@@ -25,7 +25,9 @@ function call(method, timeoutMs = 5000) {
     };
     s.on('error', (e) => done(reject, e));
     s.once('connect', () => s.write(JSON.stringify({ id: 1, method, params: {} }) + '\n'));
-    readline.createInterface({ input: s }).on('line', (line) => {
+    const rl = readline.createInterface({ input: s });
+    rl.on('error', () => {}); // socket 的错误上面已经处理；readline 会再抛一次，不接住就让进程崩掉
+    rl.on('line', (line) => {
       const msg = JSON.parse(line);
       if (msg.error !== undefined) done(reject, new Error(String(msg.error)));
       else done(resolve, msg.result);

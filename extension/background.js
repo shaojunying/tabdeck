@@ -70,11 +70,62 @@ function onHostMessage(msg) {
 }
 
 // ---------- session 状态 ----------
+// 存在 storage.local：扩展重载（改代码、更新）后 MCP server 还是那个，session 要接得上，不能像 storage.session 那样清空。
+// 浏览器重启后标签页和组的 id 全变了，旧记录没用，启动时清掉。
 async function loadSessions() {
-  return (await chrome.storage.session.get('sessions')).sessions || {};
+  return (await chrome.storage.local.get('sessions')).sessions || {};
 }
 function saveSessions(sessions) {
-  return chrome.storage.session.set({ sessions });
+  return chrome.storage.local.set({ sessions });
+}
+chrome.runtime.onStartup.addListener(() => locked(() => saveSessions({})));
+
+// 失主的组：MCP server 进程没了（Claude Code 重启、恢复会话、重连 MCP）时，它的标签页组留给用户，
+// 记录标成 orphan 留着。新的 session 用同名 session_start，或者直接操作组里的标签页时，把组收回来。
+const ORPHAN_TTL_MS = 7 * 24 * 3600 * 1000;
+let ctx = null; // 当前在处理的请求：{ sid, sessions }，给 page.js 的 ownedTab 收编失主标签页用
+
+async function takeOver(sess, oid, o, sessions) {
+  sess.groupId = o.groupId;
+  sess.color = sess.color || o.color;
+  sess.extra = [...new Set([...sess.extra, ...o.extra])];
+  if (!sess.name) sess.name = o.name;
+  delete sessions[oid];
+  await chrome.tabGroups.update(sess.groupId, { title: await groupTitle(sess), ...(sess.color ? { color: sess.color } : {}) });
+}
+
+// 这个标签页属于某个失主的组（或它的弹窗标签页）：本 session 还没有组就整组接过来，否则只把这一个挪进本组。
+async function claimOrphanTab(sess, tabId) {
+  if (!ctx) return false;
+  const { sid, sessions } = ctx;
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    return false;
+  }
+  for (const [oid, o] of Object.entries(sessions)) {
+    if (!o.orphan) continue;
+    const inGroup = o.groupId != null && tab.groupId === o.groupId;
+    if (!inGroup && !o.extra.includes(tabId)) continue;
+    if (inGroup && !(await liveGroup(sess))) await takeOver(sess, oid, o, sessions);
+    else if (inGroup) await putInSessionGroup(sess, sid, [tabId]);
+    else {
+      o.extra = o.extra.filter((x) => x !== tabId);
+      sess.extra.push(tabId);
+    }
+    return true;
+  }
+  return false;
+}
+
+// 组已经没了（用户关了 / 解散了）或者放了太久的失主记录，删掉。
+async function pruneOrphans(sessions) {
+  for (const [oid, o] of Object.entries(sessions)) {
+    if (!o.orphan) continue;
+    const alive = (await liveGroup(o)) || o.extra.length;
+    if (!alive || Date.now() - (o.orphanedAt || 0) > ORPHAN_TTL_MS) delete sessions[oid];
+  }
 }
 
 // 组的外观要一眼能区分：
@@ -184,21 +235,36 @@ function requireTabIds(p) {
 
 // ---------- 工具实现 ----------
 const handlers = {
-  async session_start(sess, sid, p) {
+  async session_start(sess, sid, p, sessions) {
     if (!p.name) throw new Error('name is required');
     sess.name = String(p.name);
     if (p.color) sess.color = p.color;
-    if (await liveGroup(sess)) {
+    let resumed = false;
+    if (!(await liveGroup(sess))) {
+      // 上一个进程留下的同名组：接着用（最近失主的优先）。
+      const cands = Object.entries(sessions)
+        .filter(([, o]) => o.orphan && o.name === sess.name)
+        .sort((a, b) => (b[1].orphanedAt || 0) - (a[1].orphanedAt || 0));
+      for (const [oid, o] of cands) {
+        if (!(await liveGroup(o))) continue;
+        await takeOver(sess, oid, o, sessions);
+        resumed = true;
+        break;
+      }
+    }
+    if (!resumed && (await liveGroup(sess))) {
       await chrome.tabGroups.update(sess.groupId, { title: await groupTitle(sess), ...(p.color ? { color: p.color } : {}) });
     }
-    return sessionInfo(sess);
+    const info = await sessionInfo(sess);
+    if (resumed) info.resumed = 'Took over the tab group an earlier TabDeck session left with this name; its tabs are listed here and can be used directly.';
+    return info;
   },
 
   async tabs_list(sess, sid, p, sessions) {
     if (p.scope !== 'all') return sessionInfo(sess);
     const mine = new Set((await sessionTabs(sess)).map((t) => t.id));
     const owner = new Map();
-    for (const [id, s] of Object.entries(sessions)) if (s.groupId != null) owner.set(s.groupId, id === sid ? 'this' : 'other');
+    for (const [id, s] of Object.entries(sessions)) if (s.groupId != null) owner.set(s.groupId, id === sid ? 'this' : s.orphan ? 'orphan' : 'other');
     return {
       groups: (await chrome.tabGroups.query({})).map((g) => ({ ...groupInfo(g), session: owner.get(g.id) || null })),
       tabs: (await chrome.tabs.query({})).map((t) => ({ ...tabInfo(t), inSession: mine.has(t.id) })),
@@ -240,7 +306,8 @@ const handlers = {
     const ids = requireTabIds(p);
     if (!p.force) {
       const mine = new Set((await sessionTabs(sess)).map((t) => t.id));
-      const foreign = ids.filter((id) => !mine.has(id));
+      const foreign = [];
+      for (const id of ids) if (!mine.has(id) && !(await claimOrphanTab(sess, id))) foreign.push(id);
       if (foreign.length) {
         throw new Error(`Tabs ${foreign.join(', ')} do not belong to this session. Adopt them first or pass force=true.`);
       }
@@ -251,7 +318,7 @@ const handlers = {
 
   async tab_activate(sess, sid, p) {
     if (!Number.isInteger(p.tabId)) throw new Error('tabId is required');
-    const t = await chrome.tabs.update(p.tabId, { active: true });
+    const t = await activateTab(p.tabId);
     if (p.focusWindow) await chrome.windows.update(t.windowId, { focused: true });
     return tabInfo(t);
   },
@@ -312,21 +379,35 @@ async function dispatch({ sessionId: sid, method, params }) {
   try {
     if (method === 'session.disconnected') {
       // MCP server 进程没了：只在 session 的标签页全是空白页时才替它关掉，其余原样留给用户。
+      // 其余的标签页留给用户，记录标成失主，之后的 session 还能接回去。
       const sess = sessions[sid];
-      if (sess) {
+      if (sess && !sess.orphan) {
         const tabs = await sessionTabs(sess);
         await detachTabs(tabs.map((t) => t.id));
-        if (tabs.length && tabs.every((t) => BLANK.has(t.url || t.pendingUrl || ''))) await closeTabs(tabs.map((t) => t.id));
-        delete sessions[sid];
+        if (tabs.length && tabs.every((t) => BLANK.has(t.url || t.pendingUrl || ''))) {
+          await closeTabs(tabs.map((t) => t.id));
+          delete sessions[sid];
+        } else if (tabs.length) {
+          sess.orphan = true;
+          sess.orphanedAt = Date.now();
+        } else delete sessions[sid];
       }
       return null;
     }
     const handler = handlers[method];
     if (!handler) throw new Error(`Unknown method: ${method}`);
     if (!sid) throw new Error('sessionId is required');
+    await pruneOrphans(sessions);
     const sess = (sessions[sid] ||= { name: null, color: null, groupId: null, extra: [] });
+    // 同一个 MCP server 重新连上来（比如扩展重载后）：它的记录如果已被标成失主，恢复成自己的。
+    if (sess.orphan) {
+      delete sess.orphan;
+      delete sess.orphanedAt;
+    }
+    ctx = { sid, sessions };
     return await handler(sess, sid, params || {}, sessions);
   } finally {
+    ctx = null;
     await saveSessions(sessions);
   }
 }

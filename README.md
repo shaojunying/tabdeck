@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
-  <img alt="Version 0.4.2" src="https://img.shields.io/badge/version-0.4.2-8ab4f8">
+  <img alt="Version 0.5.0" src="https://img.shields.io/badge/version-0.5.0-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 extension" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
   <img alt="Zero dependencies" src="https://img.shields.io/badge/dependencies-0-brightgreen">
@@ -35,8 +35,10 @@
 - 🗂️ **One tab group per session**, named after the task, in a color that stands apart.
 - 🧲 **Tabs opened by a click stay in the group** and never steal the tab you are looking at.
 - 🌙 **Works in background tabs**: clicking, typing and screenshots need no focus.
-- 🔒 **Only touches its own tabs**, unless it explicitly adopts one of yours.
-- 🚫 **No "Open the app?" prompts**: pages cannot launch desktop apps (`msteams:`, `zoommtg:`, `slack:`, `mailto:` ...), so the agent stays in the web version and nobody has to click a browser prompt.
+- 🔒 **Only touches its own tabs**, unless it explicitly adopts one of yours. A new session picks up the group an ended one left behind.
+- ⌨️ **Never leaves the cursor in a text box nobody clicked**, so chat apps do not show you as typing.
+- 🎯 **Survives re-renders**: act by an element's name, and a ref the page re-rendered is found again by role and name.
+- 🚫 **No "Open the app?" prompts**: pages cannot launch desktop apps (`msteams:`, `zoommtg:`, `slack:`, `mailto:` ...), so the agent stays in the web version and nobody has to click a browser prompt. Teams links skip the "Use the web app instead" page and open straight in Teams on the web.
 - 🔍 **Debugging built in**: console, network, dialogs, iframes and file uploads.
 - 🪶 **No dependencies**: about 1,700 lines of plain JavaScript.
 
@@ -76,7 +78,7 @@ Uninstall with `node scripts/setup.mjs --uninstall`, then remove the extension.
 
 | Tool | What it does |
 |---|---|
-| `session_start` | Name this session's tab group after the task |
+| `session_start` | Name this session's tab group after the task; takes over a group an ended session left with that name |
 | `tabs_list` | List this session's tabs, or everything with `scope="all"` |
 | `tab_open` | Open a tab in the group, in the background by default |
 | `tabs_adopt` | Take over existing tabs by moving them into the group |
@@ -89,14 +91,14 @@ Uninstall with `node scripts/setup.mjs --uninstall`, then remove the extension.
 </details>
 
 <details>
-<summary><b>Pages</b> (17)</summary>
+<summary><b>Pages</b> (18)</summary>
 
 | Tool | What it does |
 |---|---|
 | `page_navigate` | Load a URL and wait for it |
 | `page_snapshot` | Read the page, iframes included, as a compact accessibility tree with element refs |
-| `page_click` | Click by ref; reports tabs the click opened |
-| `page_type` | Type into a field by ref, optional Enter |
+| `page_click` | Click by ref or by name; reports tabs the click opened |
+| `page_type` | Type into a field by ref or by name, optional Enter |
 | `page_key` | Press a key |
 | `page_select` | Choose options in a native `<select>` |
 | `page_fill` | Fill several fields in one call: text, selects, checkboxes |
@@ -105,7 +107,8 @@ Uninstall with `node scripts/setup.mjs --uninstall`, then remove the extension.
 | `page_hover` | Hover an element |
 | `page_scroll` | Scroll by a screen, to top / bottom, or to an element |
 | `page_history` | Back, forward, reload |
-| `page_wait` | Wait for text to appear or disappear |
+| `page_wait` | Wait for text or a CSS selector to appear or disappear, or for a fixed time |
+| `page_text` | Read plain text: whole page, one element or every match of a selector; paged, from the end, or around a word |
 | `page_eval` | Run a JavaScript expression in the page |
 | `page_screenshot` | JPEG of the visible area, at most 1280px wide |
 | `page_console` | Console output and uncaught errors, including earlier ones |

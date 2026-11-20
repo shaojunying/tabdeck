@@ -143,8 +143,8 @@ try {
   const survivor = snap.tabs.find((t) => t.id === r1.id);
   assert.ok(survivor, '有内容的标签页不应当被自动关掉');
   assert.equal(survivor.groupId, r1.groupId);
-  assert.equal(snap.groups.find((g) => g.id === r1.groupId).session, null);
-  console.log('ok  退出清理：有内容的标签页原样保留（组也在），不再归 session 管');
+  assert.equal(snap.groups.find((g) => g.id === r1.groupId).session, 'orphan');
+  console.log('ok  退出清理：有内容的标签页原样保留（组也在），标成失主，等新的 session 接回');
   await forceClose([r1.id]);
 
   await sleep(300);

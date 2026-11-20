@@ -14,12 +14,23 @@ const color = {
 
 const tabId = { type: 'integer', description: "A tab that belongs to this session (see tabs_list)." };
 const ref = { type: 'string', description: 'Element ref from page_snapshot, e.g. "e42" (or "f1e42" for an element inside a cross-site iframe).' };
+// 不先拍快照、按名字找元素：page_click / page_type / page_hover 用。
+const locator = {
+  name: {
+    type: 'string',
+    description:
+      'Instead of ref: the element\'s name as page_snapshot shows it (the quoted text), e.g. "Send" or "Type a message". An exact match (ignoring case and extra spaces) wins, otherwise names containing it. Fails and lists the candidates if several match.',
+  },
+  role: { type: 'string', description: 'With name: only elements of this role, e.g. "button", "link", "textbox", "treeitem".' },
+  nth: { type: 'integer', description: 'With name: take the nth match (1-based) when several match.' },
+};
+const STALE = ' If the ref has gone stale because the page re-rendered the element, the element with the same role and name is used instead (reported under "target").';
 
 module.exports = [
   {
     name: 'session_start',
     description:
-      "Name this session's tab group after the task you are doing (e.g. \"查发票\"). Call it once at the start of a browser task; calling it again renames the group. The group itself appears when the first tab is opened or adopted.",
+      "Name this session's tab group after the task you are doing (e.g. \"查发票\"). Call it once at the start of a browser task; calling it again renames the group. The group itself appears when the first tab is opened or adopted. If an earlier TabDeck session that has since ended (for example before Claude Code restarted) left a group with this name, this session takes it over and its tabs are listed (\"resumed\").",
     inputSchema: {
       type: 'object',
       properties: {
@@ -42,7 +53,7 @@ module.exports = [
   {
     name: 'tab_open',
     description:
-      "Open a new tab inside this session's tab group (the group is created on first use). The tab opens in the background unless active=true. Pages in this session's tabs cannot launch desktop apps: a jump to an app link (msteams:, zoommtg:, slack:, mailto: ...) is blocked, so Chrome's \"Open the app?\" prompt never appears, and it is logged in page_console. The page stays where it is: use its \"continue in the browser\" / \"use the web app\" option.",
+      "Open a new tab inside this session's tab group (the group is created on first use). The tab opens in the background unless active=true. Pages in this session's tabs cannot launch desktop apps: a jump to an app link (msteams:, zoommtg:, slack:, mailto: ...) is blocked, so Chrome's \"Open the app?\" prompt never appears, and it is logged in page_console. The page stays where it is: use its \"continue in the browser\" / \"use the web app\" option. Teams deep links (teams.microsoft.com/l/...) go straight to Teams on the web instead of stopping on the launcher page. When a page puts the text cursor into a field by itself (autofocus on load, a chat app focusing its message box), the focus is taken out again so chat apps do not show the user as typing; clicking the field or page_type still focuses it.",
     inputSchema: {
       type: 'object',
       properties: { url: { type: 'string', description: 'URL to open. Omit for a blank tab.' }, active: { type: 'boolean' } },
@@ -130,7 +141,7 @@ module.exports = [
   {
     name: 'page_snapshot',
     description:
-      "Read a page as a compact accessibility tree: one line per element with its role and name. Elements you can act on carry a ref like [ref=e42]; pass that ref to page_click / page_type. Refs stay valid until the page navigates or re-renders the element; take a new snapshot after the page changes. Iframes are included; elements inside a cross-site iframe have refs like f1e6. Page regions (main, navigation, form, table, dialog) and named images have refs too. A large page is cut at about 40,000 characters: pass ref to read only that element and what is inside it, or interactive=true to list only the elements you can act on. Works on this session's tabs only.",
+      "Read a page as a compact accessibility tree: one line per element with its role and name. To read long text (messages, an email, an article), page_text is shorter. Elements you can act on carry a ref like [ref=e42]; pass that ref to page_click / page_type. Refs stay valid until the page navigates or re-renders the element; take a new snapshot after the page changes. Iframes are included; elements inside a cross-site iframe have refs like f1e6. Page regions (main, navigation, form, table, dialog) and named images have refs too. A large page is cut at about 40,000 characters: pass ref to read only that element and what is inside it, or interactive=true to list only the elements you can act on. Works on this session's tabs only.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -144,21 +155,21 @@ module.exports = [
   {
     name: 'page_click',
     description:
-      'Click an element by its ref from page_snapshot. Returns the tab afterwards (compare its url to see whether it navigated). If the click opened new tabs, they are listed under "opened"; they already belong to this session and the tab the user was looking at stays in front, so use their ids directly.',
+      'Click an element by its ref from page_snapshot, or by its name without a snapshot. Returns the tab afterwards (compare its url to see whether it navigated). If the click opened new tabs, they are listed under "opened"; they already belong to this session and the tab the user was looking at stays in front, so use their ids directly.' + STALE,
     inputSchema: {
       type: 'object',
-      properties: { tabId, ref, double: { type: 'boolean', description: 'Double-click instead.' } },
-      required: ['tabId', 'ref'],
+      properties: { tabId, ref, ...locator, double: { type: 'boolean', description: 'Double-click instead.' } },
+      required: ['tabId'],
     },
   },
   {
     name: 'page_type',
     description:
-      'Type text into an input, textarea or editable element by its ref. Replaces the existing content unless append=true. Set submit=true to press Enter afterwards.',
+      'Type text into an input, textarea or editable element, given by its ref or its name (e.g. name "Type a message"). Replaces the existing content unless append=true. Set submit=true to press Enter afterwards.' + STALE,
     inputSchema: {
       type: 'object',
-      properties: { tabId, ref, text: { type: 'string' }, append: { type: 'boolean' }, submit: { type: 'boolean' } },
-      required: ['tabId', 'ref', 'text'],
+      properties: { tabId, ref, ...locator, text: { type: 'string', description: 'The text to type.' }, append: { type: 'boolean' }, submit: { type: 'boolean' } },
+      required: ['tabId', 'text'],
     },
   },
   {
@@ -185,8 +196,8 @@ module.exports = [
   },
   {
     name: 'page_hover',
-    description: 'Move the mouse over an element by its ref (links, buttons, inputs and named images have one), to reveal hover menus or tooltips. Take a page_snapshot afterwards to see what appeared.',
-    inputSchema: { type: 'object', properties: { tabId, ref }, required: ['tabId', 'ref'] },
+    description: 'Move the mouse over an element by its ref (links, buttons, inputs and named images have one) or its name, to reveal hover menus or tooltips. Take a page_snapshot afterwards to see what appeared.',
+    inputSchema: { type: 'object', properties: { tabId, ref, ...locator }, required: ['tabId'] },
   },
   {
     name: 'page_scroll',
@@ -210,17 +221,42 @@ module.exports = [
   {
     name: 'page_wait',
     description:
-      'Wait until some text appears on the page (text) or disappears from it (textGone), for example after an action that loads content asynchronously. Fails after timeoutMs (default 10000, max 15000).',
+      'Wait for the page, for example after an action that loads content asynchronously. Pass one of: text (until it appears) / textGone (until it disappears), matched ignoring case against the visible text, the title, placeholders, aria-labels, tooltips, alt text, input values and iframes; selector / selectorGone (until a visible element matches this CSS selector / none does); or only ms to simply wait that long (max 15000). Fails after timeoutMs (default 10000, max 15000).',
     inputSchema: {
       type: 'object',
-      properties: { tabId, text: { type: 'string' }, textGone: { type: 'string' }, timeoutMs: { type: 'integer' } },
+      properties: {
+        tabId,
+        text: { type: 'string' },
+        textGone: { type: 'string' },
+        selector: { type: 'string', description: 'CSS selector, e.g. [data-tid="chat-pane-message"].' },
+        selectorGone: { type: 'string' },
+        ms: { type: 'integer', description: 'Just wait this many milliseconds (when no other condition is given).' },
+        timeoutMs: { type: 'integer' },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
+    name: 'page_text',
+    description:
+      'Read the page\'s plain text: the whole page, one element (ref), or every element matching a CSS selector (separated by "-----", e.g. the messages of a chat). Long text comes in parts: pass offset to read on, or a negative offset to read from the end (offset=-5000 is the last 5000 characters, such as the latest messages). Pass find to get only the passages around a word, each with its position for offset. Use this instead of page_eval for reading.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        ref: { type: 'string', description: 'Read only this element, e.g. the ref of main or an article.' },
+        selector: { type: 'string', description: 'Read every element matching this CSS selector in the main page.' },
+        find: { type: 'string', description: 'Return only the passages around this text (ignoring case), up to 20.' },
+        offset: { type: 'integer', description: 'Character position to start at; negative counts from the end.' },
+        maxChars: { type: 'integer', description: 'How much to return (default 20000, max 60000).' },
+      },
       required: ['tabId'],
     },
   },
   {
     name: 'page_eval',
     description:
-      'Run a JavaScript expression in the page and return its JSON-serializable value (promises are awaited). An escape hatch for things the other tools cannot do, such as reading a specific value or calling a page API; prefer page_snapshot / page_click / page_type for ordinary reading and acting.',
+      'Run a JavaScript expression in the page and return its JSON-serializable value (promises are awaited). An escape hatch for things the other tools cannot do, such as reading a specific value or calling a page API; prefer page_snapshot / page_text for reading, page_click / page_type (by ref or name) for acting and page_wait for waiting.',
     inputSchema: { type: 'object', properties: { tabId, expression: { type: 'string' } }, required: ['tabId', 'expression'] },
   },
   {

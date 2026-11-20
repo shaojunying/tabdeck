@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/shaojunying/tabdeck?color=81c995"></a>
-  <img alt="版本 0.4.2" src="https://img.shields.io/badge/version-0.4.2-8ab4f8">
+  <img alt="版本 0.5.0" src="https://img.shields.io/badge/version-0.5.0-8ab4f8">
   <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-c58af9">
   <img alt="Chrome MV3 扩展" src="https://img.shields.io/badge/Chrome-MV3%20extension-4285F4?logo=googlechrome&logoColor=white">
   <img alt="零依赖" src="https://img.shields.io/badge/dependencies-0-brightgreen">
@@ -36,7 +36,7 @@
 - 🧲 **点击开出的新标签页留在组里**，不抢你正在看的标签页。
 - 🌙 **在后台标签页里干活**：点击、输入、截图都不用切到前台。
 - 🔒 **只动自己的标签页**，要动你的标签页必须先明确收编。
-- 🚫 **不弹"要打开 App 吗？"**：页面拉不起桌面 App（`msteams:`、`zoommtg:`、`slack:`、`mailto:` 等），agent 留在网页版，不需要有人去点浏览器弹窗。
+- 🚫 **不弹"要打开 App 吗？"**：页面拉不起桌面 App（`msteams:`、`zoommtg:`、`slack:`、`mailto:` 等），agent 留在网页版，不需要有人去点浏览器弹窗。Teams 链接不再停在"Use the web app instead"中转页，直接进网页版。
 - 🔍 **自带调试能力**：console、网络请求、弹窗、iframe、文件上传。
 - 🪶 **零依赖**：约 1700 行纯 JavaScript。
 
@@ -76,7 +76,7 @@ node scripts/setup.mjs
 
 | 工具 | 作用 |
 |---|---|
-| `session_start` | 给本 session 的组按任务起名 |
+| `session_start` | 给本 session 的组按任务起名；已结束的 session 留下的同名组会被接回来 |
 | `tabs_list` | 列出本 session 的标签页；`scope="all"` 列出全部 |
 | `tab_open` | 在组里开新标签页，默认在后台 |
 | `tabs_adopt` | 把已有标签页收进本 session 的组 |
@@ -89,14 +89,14 @@ node scripts/setup.mjs
 </details>
 
 <details>
-<summary><b>页面操作</b>（17 个）</summary>
+<summary><b>页面操作</b>（18 个）</summary>
 
 | 工具 | 作用 |
 |---|---|
 | `page_navigate` | 打开网址并等加载完 |
 | `page_snapshot` | 把页面（含 iframe）读成紧凑的无障碍树，可操作的元素带 ref |
-| `page_click` | 按 ref 点击，并报告点击开出的新标签页 |
-| `page_type` | 按 ref 输入文字，可选回车 |
+| `page_click` | 按 ref 或名字点击，并报告点击开出的新标签页 |
+| `page_type` | 按 ref 或名字输入文字，可选回车 |
 | `page_key` | 按一个键 |
 | `page_select` | 在原生下拉框里选中选项 |
 | `page_fill` | 一次填多个字段：文本框、下拉框、复选框 |
@@ -105,7 +105,8 @@ node scripts/setup.mjs
 | `page_hover` | 悬停到元素上 |
 | `page_scroll` | 滚一屏、到顶 / 到底，或滚到某个元素 |
 | `page_history` | 后退、前进、刷新 |
-| `page_wait` | 等某段文字出现或消失 |
+| `page_wait` | 等文字或 CSS 选择器出现 / 消失，或单纯等一段时间 |
+| `page_text` | 读纯文本：整页、某个元素或选择器匹配的每个元素；可分段、从末尾读、按关键词定位 |
 | `page_eval` | 在页面里执行一段 JavaScript |
 | `page_screenshot` | 截当前可见区域，JPEG，最宽 1280 像素 |
 | `page_console` | console 输出和未捕获的异常，包括之前的记录 |

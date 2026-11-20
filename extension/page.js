@@ -9,11 +9,13 @@ let windowOpens = []; // 最近的 Page.windowOpen 事件：{ tabId, url, at }
 // 只存在内存里；调试器挂着时 Chrome 不会回收 service worker。
 const tabState = new Map();
 const MAX_CONSOLE = 500;
+const MAX_REFS = 5000;
 const MAX_REQUESTS = 500;
 function stateOf(tabId) {
   let st = tabState.get(tabId);
   if (!st) {
-    st = { console: [], requests: new Map(), seq: 0, dialog: null, dialogWaiters: new Set(), frames: [], runtimeOn: false };
+    // refs：快照里发出去的 ref → { role, name }，ref 失效（页面重绘了那个元素）时按它重新找。
+    st = { console: [], requests: new Map(), seq: 0, dialog: null, dialogWaiters: new Set(), frames: [], runtimeOn: false, refs: new Map() };
     tabState.set(tabId, st);
   }
   return st;
@@ -188,6 +190,53 @@ const NO_APP_LAUNCH = `(() => {
     if (url != null && url !== '' && external(url)) { note(url); return null; }
     return open.call(this, url, ...rest);
   };
+  // Teams 深链接（/l/chat/...、/l/meetup-join/... 等）会被 302 到中转页 /dl/launcher/launcher.html?url=<深链接>，
+  // 拉不起 App 后就停在"Use the web app instead"上。中转页自己认深链接里的 webjoin=true（带上就直接跳网页版），
+  // 所以在它的脚本运行前补上这个参数、重新加载一次。已经带了就不动，最多多加载一次中转页。
+  if (window === top && ['teams.microsoft.com', 'teams.live.com'].indexOf(location.hostname) >= 0 && location.pathname.indexOf('/dl/launcher/') === 0) {
+    try {
+      const u = new URL(location.href);
+      const deep = u.searchParams.get('url');
+      if (deep && !/[?&]webjoin=true/i.test(deep)) {
+        u.searchParams.set('url', deep + (deep.indexOf('?') >= 0 ? '&' : '?') + 'webjoin=true');
+        console.warn('[TabDeck] Teams launcher page: continuing in the web app');
+        location.replace(u.href);
+      }
+    } catch (e) {}
+  }
+  // 页面自己把光标放进输入框（加载完自动聚焦、切换聊天后聚焦输入框）时，把焦点移出来：聊天类应用会把
+  // "光标在输入框里"当成在输入，别人能看到。只放过有人点的就是这个框（或包着它的 label / 控件），
+  // 刚按过键（Tab 切过去），或 page_eval 的脚本正在运行（__tabdeckFocusOk）这几种情况。
+  // 同一个框 2 秒内最多移 3 次，免得和"一失焦就抢回焦点"的页面来回打架。
+  let intent = { t: 0, target: null, key: false };
+  const mark = (key) => (e) => { intent = { t: Date.now(), target: key ? null : e.composedPath()[0], key }; };
+  addEventListener('pointerdown', mark(false), true);
+  addEventListener('mousedown', mark(false), true);
+  addEventListener('keydown', mark(true), true);
+  const NOT_TEXT = /^(button|submit|reset|checkbox|radio|range|color|file|image|hidden)$/i;
+  const editable = (el) => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !NOT_TEXT.test(el.type || '')));
+  const near = (a, b) => {
+    if (!a || !b || !a.nodeType) return false;
+    if (a === b || (a.contains && a.contains(b)) || (b.contains && b.contains(a))) return true;
+    const label = a.closest && a.closest('label');
+    return !!label && (label.control === b || label.contains(b));
+  };
+  const blurred = new WeakMap();
+  addEventListener('focusin', (e) => {
+    const el = e.composedPath()[0];
+    if (!editable(el)) return;
+    if (window.__tabdeckFocusOk) return;
+    if (Date.now() - intent.t < 1000 && (intent.key || near(intent.target, el))) return;
+    const now = Date.now();
+    const hist = (blurred.get(el) || []).filter((t) => now - t < 2000);
+    if (hist.length >= 3) return;
+    blurred.set(el, hist.concat(now));
+    setTimeout(() => {
+      let a = document.activeElement;
+      while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+      if (a === el) { el.blur(); try { console.info('[TabDeck] moved focus out of a text field the page focused by itself'); } catch (e2) {} }
+    }, 0);
+  }, true);
 })()`;
 
 // 给一个调试会话（标签页本身或它的某个跨站 iframe）打开需要的事件。
@@ -267,7 +316,10 @@ async function detachTabs(ids) {
 async function ownedTab(sess, p) {
   if (!Number.isInteger(p.tabId)) throw new Error('tabId is required');
   const mine = (await sessionTabs(sess)).some((t) => t.id === p.tabId);
-  if (!mine) throw new Error(`Tab ${p.tabId} does not belong to this session. Open it with tab_open or take it over with tabs_adopt first.`);
+  // 上一个 TabDeck session（进程已经没了）留下的标签页：直接收编过来接着用。
+  if (!mine && !(await claimOrphanTab(sess, p.tabId))) {
+    throw new Error(`Tab ${p.tabId} does not belong to this session (it is the user's tab or another running session's). Open it with tab_open or take it over with tabs_adopt first.`);
+  }
   return p.tabId;
 }
 
@@ -350,7 +402,10 @@ function renderAxTree(tree, opts = {}) {
       let line = `- ${sub ? 'iframe' : role || 'generic'}`;
       if (name) line += ` "${clip(name, 200)}"`;
       if (role === 'heading' && props.get('level')) line += ` [level=${props.get('level')}]`;
-      if ((INTERACTIVE.has(role) || focusable || REGION.has(role) || (role === 'image' && name)) && node.backendDOMNodeId && role !== 'RootWebArea' && !sub) line += ` [ref=${tr.prefix}e${node.backendDOMNodeId}]`;
+      if ((INTERACTIVE.has(role) || focusable || REGION.has(role) || (role === 'image' && name)) && node.backendDOMNodeId && role !== 'RootWebArea' && !sub) {
+        line += ` [ref=${tr.prefix}e${node.backendDOMNodeId}]`;
+        if (opts.record) opts.record(`${tr.prefix}e${node.backendDOMNodeId}`, role, name);
+      }
       for (const f of FLAGS) {
         const v = props.get(f);
         if (v === true || v === 'true') line += ` [${f}]`;
@@ -390,7 +445,7 @@ function renderAxTree(tree, opts = {}) {
 const MAX_IFRAMES = 25;
 async function collectTree(tabId, sessionId, frameId, budget, depth = 0) {
   const { nodes } = await cdp(tabId, 'Accessibility.getFullAXTree', frameId ? { frameId } : {}, 15000, sessionId);
-  const tree = { nodes, prefix: framePrefix(tabId, sessionId), frames: new Map() };
+  const tree = { nodes, prefix: framePrefix(tabId, sessionId), sessionId, frames: new Map() };
   if (depth >= 4) return tree;
   for (const n of nodes) {
     const role = n.role && n.role.value;
@@ -505,6 +560,17 @@ async function waitLoaded(tabId, ms) {
   }
 }
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+// 用户正在拖标签页时 Chrome 会暂时拒绝改标签页（"Tabs cannot be edited right now"）：稍等重试，最多约 3 秒。
+async function activateTab(tabId) {
+  for (let i = 0; ; i++) {
+    try {
+      return await chrome.tabs.update(tabId, { active: true });
+    } catch (e) {
+      if (i >= 30 || !/cannot be edited right now/i.test(e.message)) throw e;
+      await settle(100);
+    }
+  }
+}
 
 // 执行一个可能开出新标签页的动作（点击、回车）。动作期间由这个标签页开出的新标签页：
 // 直接收进 session（不等 onCreated 那条排队的自动收编）、在返回值的 opened 里报出来，
@@ -556,7 +622,7 @@ async function actAndCollect(sess, sid, tabId, action, loadMs) {
   // 弹窗（prompt 等）也会把所在的标签页顶到前台。两种情况都切回用户原来在看的那个。
   if (front) {
     const [now] = await chrome.tabs.query({ windowId: self.windowId, active: true });
-    if (now && now.id !== front.id && (opened.includes(now.id) || now.id === tabId)) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
+    if (now && now.id !== front.id && (opened.includes(now.id) || now.id === tabId)) await activateTab(front.id).catch(() => {});
   }
   const result = withDialog(tabId, tabInfo(await waitLoaded(tabId, loadMs)));
   if (opened.length) {
@@ -573,8 +639,74 @@ function withDialog(tabId, result) {
   return result;
 }
 
+// 按无障碍名称（快照里引号中的文字）找元素：先要名字完全相同（忽略大小写、多余空白），没有再找包含它的。
+// 不给 role 时只在能操作的元素、页面区域和有名字的图片里找。
+async function findByName(tabId, { name, role, exact }) {
+  const tree = await collectTree(tabId, undefined, undefined, { left: MAX_IFRAMES });
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const want = norm(name);
+  const all = [];
+  const walk = (tr) => {
+    for (const n of tr.nodes) {
+      if (n.ignored || !n.backendDOMNodeId || tr.frames.has(n.backendDOMNodeId)) continue;
+      const r = (n.role && n.role.value) || '';
+      const focusable = (n.properties || []).some((x) => x.name === 'focusable' && x.value && x.value.value === true);
+      if (role ? r !== role : !(INTERACTIVE.has(r) || REGION.has(r) || r === 'image' || (focusable && r !== 'RootWebArea'))) continue;
+      const raw = String((n.name && n.name.value) || '').replace(/\s+/g, ' ').trim();
+      if (!raw) continue;
+      all.push({ ref: `${tr.prefix}e${n.backendDOMNodeId}`, role: r, name: raw, nm: raw.toLowerCase(), node: { backendNodeId: n.backendDOMNodeId, sessionId: tr.sessionId } });
+    }
+    for (const sub of tr.frames.values()) walk(sub);
+  };
+  walk(tree);
+  const eq = all.filter((c) => c.nm === want);
+  if (eq.length || exact) return eq;
+  return all.filter((c) => c.nm.includes(want));
+}
+
+async function isLive(tabId, node) {
+  try {
+    const { object } = await cdp(tabId, 'DOM.resolveNode', { backendNodeId: node.backendNodeId }, 5000, node.sessionId);
+    const { result } = await cdp(tabId, 'Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: 'function(){ return this.isConnected; }', returnByValue: true }, 5000, node.sessionId);
+    return result.value === true;
+  } catch (e) {
+    if (e instanceof DialogOpen) throw e;
+    return false;
+  }
+}
+
+// 动作要作用的元素：p.ref（快照里的 ref），或 p.name（+ 可选 p.role、p.nth）按名字找。
+// ref 失效了（React 之类重绘出一个新节点）就按快照时记下的角色和名字再找一次，唯一才用。
+// 返回 { node, note }，note 说明这次实际用的是哪个元素，放进结果里给 agent 看。
+async function targetNode(tabId, p) {
+  if (p.ref) {
+    const node = refToNode(tabId, p.ref);
+    if (await isLive(tabId, node)) return { node };
+    const info = stateOf(tabId).refs.get(String(p.ref));
+    const stale = `Element ref "${p.ref}" is gone (the page re-rendered or removed it).`;
+    if (!info || !info.name) throw new Error(`${stale} Take a new page_snapshot.`);
+    const list = await findByName(tabId, { name: info.name, role: info.role, exact: true });
+    if (list.length !== 1) throw new Error(`${stale} ${list.length ? `${list.length} elements` : 'No element'} now match its role and name (${info.role} "${clip(info.name, 60)}"); take a new page_snapshot.`);
+    return { node: list[0].node, note: `ref ${p.ref} had gone stale; used the ${info.role} "${clip(info.name, 60)}" now at ref ${list[0].ref}` };
+  }
+  if (p.name) {
+    const what = `${p.role ? p.role + ' ' : ''}"${p.name}"`;
+    const list = await findByName(tabId, { name: p.name, role: p.role });
+    let c;
+    if (Number.isInteger(p.nth)) {
+      c = list[p.nth - 1];
+      if (!c) throw new Error(`nth=${p.nth}, but only ${list.length} element(s) match ${what}.`);
+    } else if (list.length === 1) c = list[0];
+    else if (!list.length) throw new Error(`No element matches ${what}. Take a page_snapshot to see the names on the page (the quoted text), or pass role.`);
+    else throw new Error(`${list.length} elements match ${what}: ${list.slice(0, 8).map((x) => `${x.role} "${clip(x.name, 60)}" [ref=${x.ref}]`).join('; ')}${list.length > 8 ? '; …' : ''}. Pass role or nth (1-based), a longer name, or one of these refs.`);
+    return { node: c.node, note: `matched ${c.role} "${clip(c.name, 60)}" [ref=${c.ref}]` };
+  }
+  throw new Error("Pass ref (from page_snapshot) or name (the element's name as page_snapshot shows it, the quoted text).");
+}
+const noted = (result, note) => (note ? Object.assign(result, { target: note }) : result);
+
 async function resolveRef(tabId, ref) {
-  const node = refToNode(tabId, ref);
+  const { node } = await targetNode(tabId, { ref });
   try {
     const { object } = await cdp(tabId, 'DOM.resolveNode', { backendNodeId: node.backendNodeId }, 10000, node.sessionId);
     return { objectId: object.objectId, sessionId: node.sessionId };
@@ -582,6 +714,106 @@ async function resolveRef(tabId, ref) {
     if (e instanceof DialogOpen) throw e;
     throw new Error(`Element not found (${e.message}). The page may have changed; take a new page_snapshot.`);
   }
+}
+
+// ---------- page_wait / page_text 在页面里跑的函数（用 toString 送进页面，不能引用外部变量） ----------
+// 文字在不在页面上：可见文字之外，还看占位符、aria-label、title、alt、输入框里的值和标题，并进同源 iframe。
+// 比较时忽略大小写、把连续空白当成一个空格。
+function PAGE_HAS_TEXT(needle) {
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').toLowerCase();
+  const target = norm(needle).trim();
+  const ATTRS = ['aria-label', 'placeholder', 'aria-placeholder', 'data-placeholder', 'title', 'alt'];
+  const scan = (doc, depth) => {
+    if (!doc || !doc.documentElement) return false;
+    if (norm(doc.title).includes(target)) return true;
+    if (doc.body && norm(doc.body.innerText).includes(target)) return true;
+    for (const el of doc.querySelectorAll('[aria-label],[placeholder],[aria-placeholder],[data-placeholder],[title],[alt],input,textarea')) {
+      for (const a of ATTRS) {
+        const v = el.getAttribute(a);
+        if (v && norm(v).includes(target)) return true;
+      }
+      if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && norm(el.value).includes(target)) return true;
+    }
+    if (depth < 3) {
+      for (const f of doc.querySelectorAll('iframe,frame')) {
+        let d = null;
+        try {
+          d = f.contentDocument;
+        } catch (e) {}
+        if (d && scan(d, depth + 1)) return true;
+      }
+    }
+    return false;
+  };
+  return scan(document, 0);
+}
+// 有没有看得见的元素匹配这个 CSS 选择器（主页面和同源 iframe）。选择器写错时返回 { error }。
+function PAGE_HAS_SELECTOR(sel) {
+  const visible = (el) => {
+    if (!el.getClientRects().length) return false;
+    const s = getComputedStyle(el);
+    return s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const scan = (doc, depth) => {
+    for (const el of doc.querySelectorAll(sel)) if (visible(el)) return true;
+    if (depth < 3) {
+      for (const f of doc.querySelectorAll('iframe,frame')) {
+        let d = null;
+        try {
+          d = f.contentDocument;
+        } catch (e) {}
+        if (d && d.documentElement && scan(d, depth + 1)) return true;
+      }
+    }
+    return false;
+  };
+  try {
+    return scan(document, 0);
+  } catch (e) {
+    return { error: String(e && e.message) };
+  }
+}
+// 页面或选择器匹配到的每个元素的纯文本（同源 iframe 的文字接在后面）。
+function PAGE_TEXT(sel) {
+  const tidy = (s) => String(s || '').replace(/[ \t ]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  try {
+    if (sel) {
+      const els = Array.from(document.querySelectorAll(sel));
+      return { count: els.length, text: els.map((e) => tidy(e.innerText || e.textContent)).join('\n-----\n') };
+    }
+  } catch (e) {
+    return { error: String(e && e.message) };
+  }
+  const parts = [tidy(document.body ? document.body.innerText : '')];
+  for (const f of document.querySelectorAll('iframe,frame')) {
+    let d = null;
+    try {
+      d = f.contentDocument;
+    } catch (e) {}
+    const t = d && d.body ? tidy(d.body.innerText) : '';
+    if (t) parts.push('--- iframe ---\n' + t);
+  }
+  return { text: parts.join('\n\n') };
+}
+const callIn = (fn, arg) =>`(${fn.toString()})(${JSON.stringify(arg)})`;
+
+// 在主页面和每个跨站 iframe 里都查一遍，任何一处有就算有。
+async function pageHasText(tabId, text) {
+  const sessions = [undefined, ...((tabState.get(tabId) || {}).frames || []).filter(Boolean).map((f) => f.sessionId)];
+  for (const s of sessions) {
+    try {
+      const { result } = await cdp(tabId, 'Runtime.evaluate', { expression: callIn(PAGE_HAS_TEXT, String(text)), returnByValue: true }, 5000, s);
+      if (result.value === true) return true;
+    } catch (e) {
+      if (e instanceof DialogOpen || !s) throw e;
+    }
+  }
+  return false;
+}
+async function pageHasSelector(tabId, sel) {
+  const { result } = await cdp(tabId, 'Runtime.evaluate', { expression: callIn(PAGE_HAS_SELECTOR, String(sel)), returnByValue: true }, 5000);
+  if (result.value && result.value.error) throw new Error(`Invalid CSS selector ${sel}: ${result.value.error}`);
+  return result.value === true;
 }
 
 const SECRET_HEADER = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-csrf-token)$/i;
@@ -605,21 +837,28 @@ const pageHandlers = {
     await ensureAttached(tabId);
     const tree = await collectTree(tabId, undefined, undefined, { left: MAX_IFRAMES });
     const t = await chrome.tabs.get(tabId);
-    return { __text: `url: ${t.url}\ntitle: ${t.title}\n\n${renderAxTree(tree, { ref: p.ref, interactive: p.interactive === true })}` };
+    const refs = stateOf(tabId).refs;
+    const record = (r, role, name) => {
+      refs.delete(r);
+      refs.set(r, { role, name });
+      if (refs.size > MAX_REFS) refs.delete(refs.keys().next().value);
+    };
+    return { __text: `url: ${t.url}\ntitle: ${t.title}\n\n${renderAxTree(tree, { ref: p.ref, interactive: p.interactive === true, record })}` };
   },
 
   async page_click(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
     await ensureAttached(tabId);
-    const pt = await centerOf(tabId, refToNode(tabId, p.ref));
-    return actAndCollect(sess, sid, tabId, () => clickAt(tabId, pt, p.double ? 2 : 1), 10000);
+    const { node, note } = await targetNode(tabId, p);
+    const pt = await centerOf(tabId, node);
+    return noted(await actAndCollect(sess, sid, tabId, () => clickAt(tabId, pt, p.double ? 2 : 1), 10000), note);
   },
 
   async page_type(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
     if (typeof p.text !== 'string') throw new Error('text is required');
     await ensureAttached(tabId);
-    const node = refToNode(tabId, p.ref);
+    const { node, note } = await targetNode(tabId, p);
     await clickAt(tabId, await centerOf(tabId, node));
     if (!p.append) {
       // 先全选，输入的内容就会替换掉原有内容。
@@ -639,8 +878,8 @@ const pageHandlers = {
     // 文字插入发给元素所在的会话：跨站 iframe 有自己的输入目标。
     if (p.text) await cdp(tabId, 'Input.insertText', { text: p.text }, 10000, node.sessionId);
     else if (!p.append) await pressKey(tabId, 'Delete');
-    if (p.submit) return actAndCollect(sess, sid, tabId, () => pressKey(tabId, 'Enter'), 10000);
-    return withDialog(tabId, tabInfo(await chrome.tabs.get(tabId)));
+    if (p.submit) return noted(await actAndCollect(sess, sid, tabId, () => pressKey(tabId, 'Enter'), 10000), note);
+    return noted(withDialog(tabId, tabInfo(await chrome.tabs.get(tabId))), note);
   },
 
   async page_key(sess, sid, p) {
@@ -664,7 +903,7 @@ const pageHandlers = {
     const [front] = self.active ? [self] : await chrome.tabs.query({ windowId: self.windowId, active: true });
     let shot;
     let note = '';
-    if (!self.active) await chrome.tabs.update(tabId, { active: true });
+    if (!self.active) await activateTab(tabId);
     try {
       shot = await cdp(tabId, 'Page.captureScreenshot', params, 8000);
       for (let i = 0; i < 2 && !self.active; i++) {
@@ -681,7 +920,7 @@ const pageHandlers = {
         `${e.message}. Chrome did not paint the tab; its window is probably minimized or fully covered. Call tab_activate with tabId=${tabId} and focusWindow=true, then try again (this brings Chrome to the front).`
       );
     } finally {
-      if (!self.active && front && front.id !== tabId) await chrome.tabs.update(front.id, { active: true }).catch(() => {});
+      if (!self.active && front && front.id !== tabId) await activateTab(front.id).catch(() => {});
     }
     if (!self.active) note = '\nnote: the tab was in the background, so it was switched to for a moment and then switched back.';
     const t = await chrome.tabs.get(tabId);
@@ -691,10 +930,11 @@ const pageHandlers = {
   async page_hover(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
     await ensureAttached(tabId);
-    const { x, y } = await centerOf(tabId, refToNode(tabId, p.ref));
+    const { node, note } = await targetNode(tabId, p);
+    const { x, y } = await centerOf(tabId, node);
     await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
     await settle(300);
-    return tabInfo(await chrome.tabs.get(tabId));
+    return noted(tabInfo(await chrome.tabs.get(tabId)), note);
   },
 
   async page_select(sess, sid, p) {
@@ -818,25 +1058,95 @@ const pageHandlers = {
 
   async page_wait(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
-    if (!p.text && !p.textGone) throw new Error('Pass text (wait until it appears) or textGone (wait until it disappears).');
+    const conds = ['text', 'textGone', 'selector', 'selectorGone'].filter((k) => typeof p[k] === 'string' && p[k] !== '');
+    if (conds.length > 1) throw new Error(`Pass only one of text, textGone, selector, selectorGone (got ${conds.join(', ')}).`);
+    if (!conds.length) {
+      // 只给 ms：单纯等一会儿（页面动画、防抖），省得写 page_eval + setTimeout。
+      if (!(Number(p.ms) > 0)) throw new Error('Pass text / textGone (wait until it appears / disappears), selector / selectorGone (a CSS selector), or ms (just wait that long).');
+      const ms = clamp(p.ms, 1000, 1, 15000);
+      await settle(ms);
+      return { waitedMs: ms };
+    }
     await ensureAttached(tabId);
+    const kind = conds[0];
+    const want = p[kind];
     const ms = clamp(p.timeoutMs, 10000, 500, 15000);
     const deadline = Date.now() + ms;
     for (;;) {
-      const { result } = await cdp(tabId, 'Runtime.evaluate', { expression: 'document.body ? document.body.innerText : ""', returnByValue: true });
-      const body = String(result.value || '');
-      const ok = p.text ? body.includes(p.text) : !body.includes(p.textGone);
+      const ok = kind === 'text' || kind === 'textGone' ? (await pageHasText(tabId, want)) === (kind === 'text') : (await pageHasSelector(tabId, want)) === (kind === 'selector');
       if (ok) return { found: true, waitedMs: ms - Math.max(deadline - Date.now(), 0) };
-      if (Date.now() > deadline) throw new Error(`Timed out after ${ms / 1000}s waiting for ${p.text ? `"${p.text}" to appear` : `"${p.textGone}" to disappear`}.`);
+      if (Date.now() > deadline) {
+        const what = { text: `"${want}" to appear`, textGone: `"${want}" to disappear`, selector: `an element matching ${want} to appear`, selectorGone: `no element to match ${want}` }[kind];
+        throw new Error(`Timed out after ${ms / 1000}s waiting for ${what}.`);
+      }
       await settle(250);
     }
+  },
+
+  // 读纯文本：整页、某个 ref、或 CSS 选择器匹配的每个元素。长文本分段读（offset 为负表示从末尾数），
+  // 或用 find 只看关键词附近的片段。
+  async page_text(sess, sid, p) {
+    const tabId = await ownedTab(sess, p);
+    await ensureAttached(tabId);
+    let text;
+    let head = '';
+    if (p.ref) {
+      const el = await resolveRef(tabId, p.ref);
+      const { result } = await cdp(
+        tabId,
+        'Runtime.callFunctionOn',
+        { objectId: el.objectId, returnByValue: true, functionDeclaration: 'function(){ return String(this.innerText || this.textContent || "").replace(/[ \\t\\u00a0]+\\n/g, "\\n").replace(/\\n{3,}/g, "\\n\\n").trim(); }' },
+        10000,
+        el.sessionId
+      );
+      text = String(result.value || '');
+    } else {
+      const { result } = await cdp(tabId, 'Runtime.evaluate', { expression: callIn(PAGE_TEXT, p.selector ? String(p.selector) : ''), returnByValue: true }, 15000);
+      const v = result.value || {};
+      if (v.error) throw new Error(`Invalid CSS selector ${p.selector}: ${v.error}`);
+      if (p.selector) {
+        if (!v.count) throw new Error(`No element matches ${p.selector}.`);
+        head = `${v.count} element(s) match ${p.selector}, separated by "-----".\n`;
+      }
+      text = String(v.text || '');
+      const cross = ((tabState.get(tabId) || {}).frames || []).filter(Boolean).length;
+      if (!p.selector && cross) head = `note: ${cross} cross-site iframe(s) are not included; use page_snapshot for those.\n`;
+    }
+    const t = await chrome.tabs.get(tabId);
+    const total = text.length;
+    head = `url: ${t.url}\ntitle: ${t.title}\nlength: ${total} chars\n${head}`;
+    if (p.find) {
+      const needle = String(p.find).toLowerCase();
+      const low = text.toLowerCase();
+      const hits = [];
+      for (let i = low.indexOf(needle); i >= 0 && hits.length < 20; i = low.indexOf(needle, i + needle.length)) hits.push(i);
+      if (!hits.length) return { __text: `${head}"${p.find}" not found.` };
+      const ctx = 300;
+      const parts = hits.map((i) => `@${i}: …${text.slice(Math.max(0, i - ctx), i + needle.length + ctx)}…`);
+      return { __text: `${head}${hits.length}${hits.length === 20 ? '+' : ''} match(es) for "${p.find}" (pass offset=<the @ number> to read from there):\n\n${parts.join('\n\n')}` };
+    }
+    const max = clamp(p.maxChars, 20000, 100, 60000);
+    let start = Number.isInteger(p.offset) ? p.offset : 0;
+    if (start < 0) start = Math.max(0, total + start);
+    start = Math.min(start, total);
+    const end = Math.min(total, start + max);
+    const more = end < total ? `\n\n… (more: pass offset=${end} to continue)` : '';
+    return { __text: `${head}showing chars ${start}-${end}\n\n${text.slice(start, end)}${more}` };
   },
 
   async page_eval(sess, sid, p) {
     const tabId = await ownedTab(sess, p);
     if (typeof p.expression !== 'string' || !p.expression.trim()) throw new Error('expression is required');
     await ensureAttached(tabId);
-    const r = await cdp(tabId, 'Runtime.evaluate', { expression: p.expression, awaitPromise: true, returnByValue: true, userGesture: true }, 15000);
+    // agent 在脚本里主动 focus() 的输入框不算"页面自己抢焦点"：脚本运行期间焦点守卫不动它。
+    const mark = (v) => cdp(tabId, 'Runtime.evaluate', { expression: `window.__tabdeckFocusOk = ${v}` }, 3000).catch(() => {});
+    await mark('true');
+    let r;
+    try {
+      r = await cdp(tabId, 'Runtime.evaluate', { expression: p.expression, awaitPromise: true, returnByValue: true, userGesture: true }, 15000);
+    } finally {
+      await mark('false');
+    }
     if (r.exceptionDetails) {
       const ex = r.exceptionDetails.exception;
       throw new Error(`Page script threw: ${(ex && (ex.description || ex.value)) || r.exceptionDetails.text}`);
